@@ -10,8 +10,9 @@ cd ~/gcenv
 ./install.sh
 ```
 
-The installer detects your shell:
-- **zsh + oh-my-zsh**: Symlinks as an oh-my-zsh plugin with prompt integration
+The installer auto-detects your setup:
+- **Powerlevel10k**: Adds a `☁️ profile` segment to your right prompt
+- **zsh + oh-my-zsh**: Symlinks as a plugin with prompt integration
 - **bash / plain zsh**: Adds `source` line to your shell config
 
 Restart your terminal after installing.
@@ -19,16 +20,13 @@ Restart your terminal after installing.
 ## Quick Start
 
 ```bash
-# Create a profile
-gcenv add prod --account=me@company.com --project=my-project
+# 1. Create a profile — follow the interactive prompts
+gcenv add prod
 
-# Authenticate (opens browser)
-gcenv login prod
-
-# Switch to it in current terminal
+# 2. Switch to it in current terminal
 gcenv use prod
 
-# Open another tab — it's independent!
+# 3. Open another tab — it's fully independent
 gcenv use staging
 ```
 
@@ -36,13 +34,13 @@ gcenv use staging
 
 | Command | Description |
 |---------|-------------|
-| `gcenv add <name>` | Create a new profile (interactive or with `--account`/`--project` flags) |
+| `gcenv add <name>` | Create a new profile. Walks you through account, project, and authentication |
 | `gcenv use <name>` | Switch current terminal to a profile |
 | `gcenv list` | List all profiles (`*` marks active) |
 | `gcenv current` | Show active profile details |
-| `gcenv remove <name>` | Delete a profile and its credentials |
-| `gcenv login <name>` | Run full auth flow (gcloud login + ADC + quota project) |
+| `gcenv login <name>` | Re-run auth for an existing profile |
 | `gcenv edit <name>` | Change account/project without re-authenticating |
+| `gcenv remove <name>` | Delete a profile and its credentials |
 
 ## How It Works
 
@@ -55,23 +53,23 @@ Each terminal tab gets its own GCP context via environment variables:
 
 No global gcloud configuration is changed. Profiles are stored in `~/.gcenv/profiles/` and ADC credentials in `~/.gcenv/adc/`.
 
-## Prompt Integration (oh-my-zsh)
+## Prompt
 
-Add `gcenv` to your plugins and add the prompt helper to your theme:
+The installer configures your prompt automatically. When a profile is active, you'll see it on the right side of your terminal:
 
-```zsh
-# ~/.zshrc
-plugins=(... gcenv)
-
-# Show active profile on the right side of prompt
-RPROMPT='$(gcenv_prompt_info)'
+```
+~/my-project main ❯                                    ☁️ prod
 ```
 
-This shows `☁ prod` when a profile is active. Customize with:
+### Manual prompt setup
 
+If you skipped the installer or want to customize:
+
+**Powerlevel10k** — add `gcenv` to `POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS` in `~/.p10k.zsh`.
+
+**Oh-my-zsh (no p10k)** — add to `~/.zshrc`:
 ```zsh
-ZSH_THEME_GCENV_PREFIX="%{$fg[cyan]%}gcp:"
-ZSH_THEME_GCENV_SUFFIX="%{$reset_color%} "
+RPROMPT='$(gcenv_prompt_info)'
 ```
 
 ## Tab Completion
