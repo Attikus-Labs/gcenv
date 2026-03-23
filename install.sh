@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# gcenv installer
+set -euo pipefail
+
+GCENV_REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+GCENV_HOME="${HOME}/.gcenv"
+
+echo "Installing gcenv..."
+echo ""
+
+# Create data directories
+mkdir -p "$GCENV_HOME/profiles" "$GCENV_HOME/adc"
+echo "Created $GCENV_HOME/"
+
+# Detect shell
+detect_shell() {
+  local shell_name
+  shell_name="$(basename "${SHELL:-/bin/bash}")"
+  echo "$shell_name"
+}
+
+CURRENT_SHELL="$(detect_shell)"
+
+# Check for oh-my-zsh
+has_omz() {
+  [[ -d "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins" ]]
+}
+
+install_omz_plugin() {
+  local plugin_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gcenv"
+  local zshrc="$HOME/.zshrc"
+
+  if [[ -L "$plugin_dir" || -d "$plugin_dir" ]]; then
+    rm -rf "$plugin_dir"
+  fi
+
+  ln -s "$GCENV_REPO_DIR" "$plugin_dir"
+  echo "Symlinked oh-my-zsh plugin: $plugin_dir -> $GCENV_REPO_DIR"
+
+  # Auto-add gcenv to plugins list in .zshrc
+  if grep -qE '^plugins=\(.*gcenv.*\)' "$zshrc" 2>/dev/null; then
+    echo "gcenv already in plugins list"
+  elif grep -qE '^plugins=\(' "$zshrc" 2>/dev/null; then
+    # Append gcenv to existing plugins=(...)
+    sed -i '' 's/^plugins=(\(.*\))/plugins=(\1 gcenv)/' "$zshrc"
+    echo "Added gcenv to plugins list in $zshrc"
+  else
+    echo "Could not find plugins=(...) in $zshrc. Please add 'gcenv' manually:"
+    echo "  plugins=(... gcenv)"
+  fi
+
+  echo ""
+}
+
+# Detect and configure Powerlevel10k prompt segment
+has_p10k() {
+  [[ -f "$HOME/.p10k.zsh" ]]
+}
+
+install_p10k_segment() {
+  local p10k="$HOME/.p10k.zsh"
+
+  # Check if gcenv segment already exists
+  if grep -qF 'prompt_gcenv' "$p10k" 2>/dev/null; then
+    echo "p10k gcenv segment already configured"
+    return
+  fi
+
+  # Add gcenv to POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS (after pyenv if present, otherwise at end)
+  if grep -qE '^\s*gcenv\s' "$p10k" 2>/dev/null; then
+    : # already in the list
+  elif grep -qE '^\s*pyenv\s' "$p10k" 2>/dev/null; then
+    sed -i '' '/^[[:space:]]*pyenv[[:space:]]/a\
+    gcenv                   # gcloud environment (gcenv)
+' "$p10k"
+    echo "Added gcenv to p10k right prompt (after pyenv)"
+  elif grep -qE 'POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS' "$p10k" 2>/dev/null; then
+    sed -i '' '/POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS/a\
+    gcenv                   # gcloud environment (gcenv)
+' "$p10k"
+    echo "Added gcenv to p10k right prompt"
+  fi
+
+  # Add the custom segment function before the example segment
+  local segment_code
+  segment_code=$(cat <<'SEGMENT'
+
+  # gcenv: show active gcloud profile in prompt
+  function prompt_gcenv() {
+    [[ -n "$GCENV_ACTIVE" ]] || return
+    p10k segment -f 33 -i '☁️' -t "$GCENV_ACTIVE"
+  }
+
+  function instant_prompt_gcenv() {
+    prompt_gcenv
+  }
+
+  typeset -g POWERLEVEL9K_GCENV_FOREGROUND=33
+  typeset -g POWERLEVEL9K_GCENV_VISUAL_IDENTIFIER_EXPANSION='☁️'
+SEGMENT
+)
+
+  # Insert before the example segment block
+  if grep -qF 'function prompt_example()' "$p10k" 2>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    awk -v seg="$segment_code" '
+      /# Example of a user-defined prompt segment/ { print seg; print "" }
+      { print }
+    ' "$p10k" > "$tmp" && mv "$tmp" "$p10k"
+  else
+    # No example segment found — append before the closing brace
+    local tmp
+    tmp=$(mktemp)
+    awk -v seg="$segment_code" '
+      /^}/ && !done { print seg; print ""; done=1 }
+      { print }
+    ' "$p10k" > "$tmp" && mv "$tmp" "$p10k"
+  fi
+
+  echo "Added gcenv prompt segment to $p10k"
+}
+
+# Fallback: add RPROMPT for users without p10k
+install_rprompt() {
+  local zshrc="$HOME/.zshrc"
+  if grep -qF 'gcenv_prompt_info' "$zshrc" 2>/dev/null; then
+    echo "RPROMPT gcenv_prompt_info already configured"
+    return
+  fi
+  echo "" >> "$zshrc"
+  echo "# gcenv prompt (shows active gcloud profile)" >> "$zshrc"
+  echo "RPROMPT='\$(gcenv_prompt_info)'" >> "$zshrc"
+  echo "Added RPROMPT with gcenv_prompt_info to $zshrc"
+}
+
+install_shell_source() {
+  local rc_file
+
+  case "$CURRENT_SHELL" in
+    zsh)  rc_file="$HOME/.zshrc" ;;
+    bash)
+      if [[ -f "$HOME/.bash_profile" ]]; then
+        rc_file="$HOME/.bash_profile"
+      else
+        rc_file="$HOME/.bashrc"
+      fi
+      ;;
+    *)
+      echo "Unsupported shell: $CURRENT_SHELL"
+      echo "Manually add to your shell config:"
+      echo "  source $GCENV_REPO_DIR/gcenv.sh"
+      return
+      ;;
+  esac
+
+  local source_line="source \"$GCENV_REPO_DIR/gcenv.sh\""
+
+  if grep -qF "gcenv.sh" "$rc_file" 2>/dev/null; then
+    echo "gcenv already sourced in $rc_file"
+  else
+    echo "" >> "$rc_file"
+    echo "# gcenv — gcloud environment switcher" >> "$rc_file"
+    echo "$source_line" >> "$rc_file"
+    echo "Added to $rc_file"
+  fi
+
+  # Add bash completions
+  if [[ "$CURRENT_SHELL" == "bash" ]]; then
+    local comp_line="source \"$GCENV_REPO_DIR/completions/gcenv.bash\""
+    if ! grep -qF "gcenv.bash" "$rc_file" 2>/dev/null; then
+      echo "$comp_line" >> "$rc_file"
+      echo "Added bash completions to $rc_file"
+    fi
+  fi
+}
+
+# Install based on detected setup
+if [[ "$CURRENT_SHELL" == "zsh" ]] && has_omz; then
+  echo "Detected: zsh with oh-my-zsh"
+  install_omz_plugin
+else
+  echo "Detected: $CURRENT_SHELL"
+  install_shell_source
+fi
+
+# Install prompt integration
+if has_p10k; then
+  echo "Detected: Powerlevel10k"
+  install_p10k_segment
+elif [[ "$CURRENT_SHELL" == "zsh" ]]; then
+  install_rprompt
+fi
+
+echo "Installation complete!"
+echo ""
+echo "Restart your terminal or run:"
+echo "  source ~/.${CURRENT_SHELL}rc"
+echo ""
+echo "Then get started:"
+echo "  gcenv add <profile-name>"
+echo "  gcenv login <profile-name>"
+echo "  gcenv use <profile-name>"
