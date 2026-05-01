@@ -1,0 +1,13 @@
+{
+  "name": "gcenv",
+  "owner": {
+    "name": "julbr"
+  },
+  "plugins": [
+    {
+      "name": "gcenv",
+      "source": ".",
+      "description": "Per-terminal and per-Claude-session GCP profile isolation."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Scope GCP commands (gcloud, gsutil, bq, terraform, kubectl, helm) to the active gcenv profile so Claude Code never accidentally crosses GCP accounts.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gcenv-pretooluse.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -192,6 +192,65 @@ elif [[ "$CURRENT_SHELL" == "zsh" ]]; then
   install_rprompt
 fi
 
+# Optional: install as a Claude Code plugin (self-hosted, this repo).
+# The repo is its own marketplace via .claude-plugin/marketplace.json.
+install_claude_plugin() {
+  if ! command -v claude >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo ""
+  echo "Detected Claude Code on PATH."
+  echo -n "Also install gcenv as a Claude Code plugin? (y/N) "
+  read -r answer
+  if [[ ! "$answer" =~ ^[Yy] ]]; then
+    return 0
+  fi
+
+  # Prefer the GitHub origin so /plugin update works against the canonical
+  # repo. Fall back to the local absolute path during dev / pre-publish.
+  local marketplace_source=""
+  if command -v git >/dev/null 2>&1 && git -C "$GCENV_REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local origin_url
+    origin_url="$(git -C "$GCENV_REPO_DIR" config --get remote.origin.url 2>/dev/null || true)"
+    case "$origin_url" in
+      git@github.com:*)
+        marketplace_source="${origin_url#git@github.com:}"
+        marketplace_source="${marketplace_source%.git}"
+        ;;
+      https://github.com/*)
+        marketplace_source="${origin_url#https://github.com/}"
+        marketplace_source="${marketplace_source%.git}"
+        ;;
+    esac
+  fi
+  if [[ -z "$marketplace_source" ]]; then
+    marketplace_source="$GCENV_REPO_DIR"
+    echo "  (using local repo path; once this is on GitHub, re-run for the canonical install)"
+  fi
+
+  echo "  Adding marketplace: $marketplace_source"
+  if ! claude /plugin marketplace add "$marketplace_source"; then
+    echo "gcenv: 'claude /plugin marketplace add' failed." >&2
+    echo "  Try manually:" >&2
+    echo "    claude /plugin marketplace add $marketplace_source" >&2
+    echo "    claude /plugin install gcenv@gcenv" >&2
+    return 0
+  fi
+
+  echo "  Installing plugin: gcenv@gcenv"
+  if ! claude /plugin install gcenv@gcenv; then
+    echo "gcenv: 'claude /plugin install' failed." >&2
+    echo "  Try manually:  claude /plugin install gcenv@gcenv" >&2
+    return 0
+  fi
+
+  echo "Claude Code plugin installed."
+}
+
+install_claude_plugin
+
+echo ""
 echo "Installation complete!"
 echo ""
 echo "Restart your terminal or run:"

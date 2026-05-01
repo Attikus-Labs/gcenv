@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# gcenv — standalone binary entrypoint.
+#
+# In a regular terminal, gcenv is loaded as a sourced shell function (so
+# `gcenv use` can export env into the parent shell). Inside Claude Code's
+# Bash subshells, sourcing isn't reliable — this binary covers everything
+# that doesn't require parent-shell env: add, list, current, login, reauth,
+# edit, remove, claude * .
+
+# gcenv.sh expects standard bash semantics, not strict mode — most subcommands
+# read state vars (GCENV_ACTIVE, etc.) that may legitimately be unset. Run
+# unstrict to match how gcenv.sh behaves when sourced from a shell rc.
+
+# Resolve gcenv.sh:
+#   - If we're running as a Claude plugin, $CLAUDE_PLUGIN_ROOT is set.
+#   - Otherwise, walk up from this script's directory.
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "$CLAUDE_PLUGIN_ROOT/gcenv.sh" ]]; then
+  GCENV_LIB="$CLAUDE_PLUGIN_ROOT/gcenv.sh"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  GCENV_LIB="$SCRIPT_DIR/../gcenv.sh"
+fi
+
+if [[ ! -f "$GCENV_LIB" ]]; then
+  echo "gcenv: cannot locate gcenv.sh (looked at: $GCENV_LIB)" >&2
+  exit 1
+fi
+
+# `gcenv use` must export env into the caller's shell — that only works when
+# gcenv is loaded as a shell function via `source gcenv.sh`. Catch this early
+# with a clear pointer rather than letting the user wonder why nothing changed.
+if [[ "${1:-}" == "use" ]]; then
+  cat <<'EOF' >&2
+gcenv: 'gcenv use' needs to set environment variables in your current shell.
+       Running it as a binary won't have any effect.
+
+       Choose one:
+         - In a regular terminal:  source gcenv.sh in your shell startup
+                                   (the installer does this for you), then
+                                   `gcenv use <profile>` works as expected.
+         - Inside Claude Code:     run `gcenv claude use <profile>` instead.
+                                   The active profile persists for the rest
+                                   of the Claude session via the hook.
+EOF
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$GCENV_LIB"
+gcenv "$@"
