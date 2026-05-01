@@ -1,0 +1,12 @@
+# /code-review scratchpad output
+CODE_REVIEW.md
+
+# OS detritus
+.DS_Store
+*~
+*.swp
+
+# Local Claude Code state (per-machine, not for the project)
+.claude/settings.local.json
+.claude/agents/
+.claude/plugins/

@@ -76,11 +76,13 @@ direnv binds environment to a *directory*, not a *terminal*. Two tabs `cd`'d int
 
 ## Quickstart
 
+One command:
+
 ```bash
-git clone <repo-url> ~/gcenv
-cd ~/gcenv
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh | bash
 ```
+
+This clones gcenv to `~/.gcenv-src` (override with `GCENV_INSTALL_DIR=...`), wires up your shell, sets up the prompt segment, and offers to also install gcenv as a Claude Code plugin if `claude` is on your PATH.
 
 The installer auto-detects your shell:
 - **Powerlevel10k** — adds a `☁️ profile` segment to your right prompt
@@ -94,6 +96,8 @@ gcenv add prod                        # interactive: account, project, login
 gcenv use prod                        # this tab is now scoped to 'prod'
 gcenv list                            # see all profiles ('*' marks active in this tab)
 ```
+
+> **Prefer to clone yourself?** `git clone https://github.com/Attikus-Labs/gcenv.git ~/gcenv && ~/gcenv/install.sh` does the same thing.
 
 ## Commands
 
@@ -115,11 +119,13 @@ gcenv list                            # see all profiles ('*' marks active in th
 
 ### Install
 
-If you ran `./install.sh` and answered yes to the Claude prompt, you're done. Otherwise, install manually with two commands:
+If you ran the curl-installer above and answered yes to the Claude prompt, you're done.
 
-```bash
-claude /plugin marketplace add julbr/gcenv
-claude /plugin install gcenv@gcenv
+Otherwise, in a Claude session, install manually with two slash commands:
+
+```
+/plugin marketplace add Attikus-Labs/gcenv
+/plugin install gcenv@gcenv
 ```
 
 That's it. The plugin gives you:

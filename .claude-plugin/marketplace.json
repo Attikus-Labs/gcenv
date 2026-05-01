@@ -1,13 +1,14 @@
 {
   "name": "gcenv",
   "owner": {
-    "name": "julbr"
+    "name": "Attikus-Labs"
   },
   "plugins": [
     {
       "name": "gcenv",
-      "source": ".",
+      "source": "./plugins/gcenv",
       "description": "Per-terminal and per-Claude-session GCP profile isolation."
     }
   ]
 }
+

@@ -1,11 +1,55 @@
 #!/usr/bin/env bash
 # gcenv installer
+#
+# Two ways to run:
+#   1. From a clone:  ./install.sh        (this script lives in the repo)
+#   2. Direct:        curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh | bash
+#
+# In curl|bash mode, the script clones the repo to ~/.gcenv-src and re-execs
+# itself from there so all relative paths resolve.
+
 set -euo pipefail
 
-GCENV_REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+GCENV_REPO_URL="${GCENV_REPO_URL:-https://github.com/Attikus-Labs/gcenv.git}"
+GCENV_INSTALL_DIR="${GCENV_INSTALL_DIR:-$HOME/.gcenv-src}"
+
+# Resolve our checkout. ${BASH_SOURCE[0]} is the script path when sourced or
+# executed from a file; empty when piped from curl. Even if it's set, the
+# "checkout" might not actually contain the gcenv tree (e.g. /tmp scratch).
+_gcenv_resolved_repo_dir() {
+  local src="${BASH_SOURCE[0]:-}"
+  [[ -z "$src" ]] && return 1
+  local dir
+  dir="$(cd "$(dirname "$src")" 2>/dev/null && pwd)" || return 1
+  [[ -f "$dir/plugins/gcenv/gcenv.sh" ]] || return 1
+  echo "$dir"
+}
+
+if ! GCENV_REPO_DIR="$(_gcenv_resolved_repo_dir)"; then
+  # curl|bash mode: clone (or update) the repo and re-exec install.sh from it.
+  if ! command -v git >/dev/null 2>&1; then
+    echo "gcenv: git is required to install. Install git, then re-run." >&2
+    exit 1
+  fi
+  if [[ -d "$GCENV_INSTALL_DIR/.git" ]]; then
+    echo "Updating existing gcenv checkout at $GCENV_INSTALL_DIR..."
+    git -C "$GCENV_INSTALL_DIR" pull --quiet --ff-only || {
+      echo "gcenv: 'git pull' failed in $GCENV_INSTALL_DIR; resolve manually and re-run." >&2
+      exit 1
+    }
+  else
+    echo "Cloning gcenv to $GCENV_INSTALL_DIR..."
+    git clone --quiet "$GCENV_REPO_URL" "$GCENV_INSTALL_DIR" || {
+      echo "gcenv: failed to clone $GCENV_REPO_URL" >&2
+      exit 1
+    }
+  fi
+  exec bash "$GCENV_INSTALL_DIR/install.sh" "$@"
+fi
+
 GCENV_HOME="${HOME}/.gcenv"
 
-echo "Installing gcenv..."
+echo "Installing gcenv from $GCENV_REPO_DIR..."
 echo ""
 
 # Create data directories
@@ -149,12 +193,12 @@ install_shell_source() {
     *)
       echo "Unsupported shell: $CURRENT_SHELL"
       echo "Manually add to your shell config:"
-      echo "  source $GCENV_REPO_DIR/gcenv.sh"
+      echo "  source $GCENV_REPO_DIR/plugins/gcenv/gcenv.sh"
       return
       ;;
   esac
 
-  local source_line="source \"$GCENV_REPO_DIR/gcenv.sh\""
+  local source_line="source \"$GCENV_REPO_DIR/plugins/gcenv/gcenv.sh\""
 
   if grep -qF "gcenv.sh" "$rc_file" 2>/dev/null; then
     echo "gcenv already sourced in $rc_file"
