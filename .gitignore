@@ -10,3 +10,8 @@ CODE_REVIEW.md
 .claude/settings.local.json
 .claude/agents/
 .claude/plugins/
+
+# Node — only present transiently if a maintainer runs `npm install` for
+# Changesets. The repo itself ships no node code.
+node_modules/
+package-lock.json

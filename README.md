@@ -128,6 +128,8 @@ Otherwise, in a Claude session, install manually with two slash commands:
 /plugin install gcenv@gcenv
 ```
 
+When Claude Code asks where to enable the plugin, pick **"Install for you, in this repo only (local scope)"** — that's the right default. The plugin scopes commands per Claude session anyway, so a repo-local install keeps you in control of which projects the hook is active in.
+
 That's it. The plugin gives you:
 
 - A `PreToolUse` hook that auto-scopes every `gcloud`, `bq`, `gsutil`, `terraform`, `kubectl`, and `helm` command Claude runs to your active profile.
@@ -136,6 +138,27 @@ That's it. The plugin gives you:
 - The `gcenv` binary on PATH inside Claude sessions.
 
 > Eventually `gcenv` will be on the official `claude-plugins-official` marketplace for a one-command install (`claude /plugin install gcenv@claude-plugins-official`). Until then, the two-command form above is the install path.
+
+### Updating
+
+To pull the latest gcenv into a Claude session that already has the plugin installed:
+
+```
+/plugin marketplace update gcenv
+/reload-plugins
+```
+
+The first command refreshes the marketplace registry from GitHub; the second re-loads the plugin in the current session. No uninstall/reinstall needed.
+
+Prefer set-and-forget? Open `/plugin`, go to **Marketplaces**, select **gcenv**, and toggle **Enable auto-update**. Claude Code will then pull updates at startup automatically.
+
+If for some reason the in-place update doesn't take effect, the fallback is a full reinstall:
+
+```
+/plugin uninstall gcenv
+/plugin install gcenv@gcenv
+/reload-plugins
+```
 
 ### Day-to-day usage
 

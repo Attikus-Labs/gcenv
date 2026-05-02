@@ -124,6 +124,38 @@ _gcenv_check_auth() {
   gcloud auth print-access-token --account="$account" </dev/null >/dev/null 2>&1
 }
 
+# True when the current shell can drive an interactive browser-launching OAuth flow.
+# Claude Code's Bash tool runs commands without a TTY, so gcloud silently falls back
+# to printing a copy-paste URL — easy to miss. We detect that and switch gcloud to
+# explicit --no-launch-browser mode with a banner so the user knows what to expect.
+_gcenv_is_interactive_tty() {
+  [[ -t 0 && -t 1 && -z "${CLAUDECODE:-}" ]]
+}
+
+# Populate the caller's `nb_flag` array with --no-launch-browser when we're not on
+# a real TTY, and print a one-time banner explaining the copy-paste flow.
+# Caller contract: declare `local -a nb_flag=()` immediately before calling, so
+# the assignment lands in caller scope and doesn't leak to shell-global state.
+_gcenv_browser_setup() {
+  if _gcenv_is_interactive_tty; then
+    nb_flag=()
+    return 0
+  fi
+
+  nb_flag=(--no-launch-browser)
+  cat >&2 <<'EOF'
+gcenv: non-interactive shell detected — using copy-paste URL flow.
+
+  gcloud will print "Go to the following link in your browser: <url>".
+  Open that URL, sign in, then paste the verification code back here.
+  You'll do this once per step (user auth + ADC = up to two URLs).
+
+  Tip: running `gcenv login <name>` in a real terminal launches the
+  browser automatically and skips the copy-paste.
+
+EOF
+}
+
 _gcenv_add() {
   local name="" account="" project=""
 
@@ -245,7 +277,9 @@ _gcenv_use() {
   # never-authenticated accounts; in both cases we want the same recovery path.
   if ! _gcenv_check_auth "$CLOUDSDK_CORE_ACCOUNT"; then
     echo "gcenv: no usable auth token for '$CLOUDSDK_CORE_ACCOUNT', authenticating..."
-    if ! gcloud auth login "$CLOUDSDK_CORE_ACCOUNT"; then
+    local -a nb_flag=()
+    _gcenv_browser_setup
+    if ! gcloud auth login "${nb_flag[@]}" "$CLOUDSDK_CORE_ACCOUNT"; then
       echo "gcenv: auth failed; run 'gcenv login $name' to retry" >&2
       return 1
     fi
@@ -347,15 +381,18 @@ _gcenv_login() {
   echo "Authenticating profile '$name' ($GCENV_ACCOUNT)..."
   echo ""
 
+  local -a nb_flag=()
+  _gcenv_browser_setup
+
   echo "==> Step 1/2: gcloud auth login"
-  if ! gcloud auth login "$GCENV_ACCOUNT"; then
+  if ! gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
     echo "gcenv: auth login failed" >&2
     return 1
   fi
 
   echo ""
   echo "==> Step 2/2: Application Default Credentials login"
-  if ! gcloud auth application-default login --billing-project="$GCENV_PROJECT"; then
+  if ! gcloud auth application-default login "${nb_flag[@]}" --billing-project="$GCENV_PROJECT"; then
     echo "gcenv: ADC login failed" >&2
     return 1
   fi
@@ -385,7 +422,11 @@ _gcenv_reauth() {
   _gcenv_read_profile "$name" || return 1
 
   echo "Reauthenticating profile '$name' ($GCENV_ACCOUNT)..."
-  if ! gcloud auth login "$GCENV_ACCOUNT"; then
+
+  local -a nb_flag=()
+  _gcenv_browser_setup
+
+  if ! gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
     echo "gcenv: reauth failed" >&2
     return 1
   fi
