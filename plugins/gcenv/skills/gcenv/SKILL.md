@@ -46,7 +46,7 @@ Run these via the standard Bash tool. The `gcenv` binary is on PATH after the pl
 
 2. **Confirm the active profile before destructive GCP work.** Before `gcloud compute instances delete`, `terraform apply`, `bq rm`, or any production-affecting command, run `gcenv claude show` and confirm with the user.
 
-3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected. If a profile is selected and auth still fails, suggest `gcenv login <profile>` (the user has to run this — it opens a browser).
+3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected. If a profile is selected and auth still fails, run `gcenv login <profile>` — on a desktop machine this opens the user's browser and returns automatically once they sign in. Pass `timeout: 600000` (10 minutes) to the Bash tool when invoking auth commands so the call doesn't time out while the user is signing in. Auth commands that may need this: `gcenv login`, `gcenv reauth`, `gcenv use` (when the profile's token has expired), and `gcenv add` (when the user accepts the "Authenticate now?" prompt).
 
 4. **If the user asks to "switch projects",** run `gcenv claude use <name>`. Do NOT run `gcloud config set project <id>`. The two are not equivalent: `gcenv claude use` also handles the account, the billing quota project, and the ADC file; `gcloud config set` mutates global state.
 
