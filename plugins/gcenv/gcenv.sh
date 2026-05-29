@@ -124,34 +124,79 @@ _gcenv_check_auth() {
   gcloud auth print-access-token --account="$account" </dev/null >/dev/null 2>&1
 }
 
-# True when the current shell can drive an interactive browser-launching OAuth flow.
-# Claude Code's Bash tool runs commands without a TTY, so gcloud silently falls back
-# to printing a copy-paste URL — easy to miss. We detect that and switch gcloud to
-# explicit --no-launch-browser mode with a banner so the user knows what to expect.
-_gcenv_is_interactive_tty() {
-  [[ -t 0 && -t 1 && -z "${CLAUDECODE:-}" ]]
+# True when this host can launch a browser via the OS handler. Used to choose
+# between gcloud's two non-TTY-friendly OAuth flows:
+#   - loopback (default): gcloud opens the browser and reads the auth code from
+#     a localhost callback. No stdin needed. Works inside Claude Code's Bash tool
+#     because `open` / `xdg-open` and a localhost listener don't need a TTY.
+#   - copy-paste (--no-launch-browser): gcloud prints a URL and reads the code
+#     from stdin. The fallback when no browser is reachable.
+_gcenv_can_launch_browser() {
+  case "$OSTYPE" in
+    darwin*)
+      command -v open >/dev/null 2>&1
+      ;;
+    linux*|*bsd*)
+      command -v xdg-open >/dev/null 2>&1 \
+        && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
-# Populate the caller's `nb_flag` array with --no-launch-browser when we're not on
-# a real TTY, and print a one-time banner explaining the copy-paste flow.
+# Populate the caller's `nb_flag` array with the right gcloud auth flag for this
+# environment, and print a one-time banner explaining what's about to happen.
 # Caller contract: declare `local -a nb_flag=()` immediately before calling, so
 # the assignment lands in caller scope and doesn't leak to shell-global state.
+#
+# Decision matrix:
+#   TTY                              → no flag; gcloud auto-detects.
+#   non-TTY, browser available       → --launch-browser; gcloud opens the
+#                                      browser and reads the code from a
+#                                      localhost callback. No stdin needed.
+#   non-TTY, no browser (truly       → --no-launch-browser; copy-paste a URL
+#   headless, e.g. remote container)   and verification code by hand.
+#
+# We force the flag explicitly in the non-TTY cases because gcloud's own
+# detection silently falls back to copy-paste mode when stdin is not a TTY —
+# which buries the URL in an agent transcript when a browser was actually
+# available the whole time.
 _gcenv_browser_setup() {
-  if _gcenv_is_interactive_tty; then
+  if [[ -t 0 && -t 1 ]]; then
     nb_flag=()
+    return 0
+  fi
+
+  if _gcenv_can_launch_browser; then
+    nb_flag=(--launch-browser)
+    cat >&2 <<'EOF'
+gcenv: non-TTY shell with browser available — using loopback OAuth.
+
+  Your default browser will open. Sign in to Google and the page will
+  redirect back automatically — no copy-pasting a verification code.
+  The browser opens once per auth step; a full login does two (user
+  account + ADC). Each step blocks until sign-in completes.
+
+EOF
+    if [[ -n "${CLAUDECODE:-}" ]]; then
+      cat >&2 <<'EOF'
+  Inside Claude Code, the Bash tool's default 2-minute timeout may be too
+  short; ask the agent to retry with a 10-minute timeout if it cuts off.
+
+EOF
+    fi
     return 0
   fi
 
   nb_flag=(--no-launch-browser)
   cat >&2 <<'EOF'
-gcenv: non-interactive shell detected — using copy-paste URL flow.
+gcenv: non-interactive shell, no browser detected — using copy-paste flow.
 
   gcloud will print "Go to the following link in your browser: <url>".
-  Open that URL, sign in, then paste the verification code back here.
-  You'll do this once per step (user auth + ADC = up to two URLs).
-
-  Tip: running `gcenv login <name>` in a real terminal launches the
-  browser automatically and skips the copy-paste.
+  Open that URL on another device, sign in, then paste the verification
+  code back here. You'll do this once per step (user auth + ADC).
 
 EOF
 }

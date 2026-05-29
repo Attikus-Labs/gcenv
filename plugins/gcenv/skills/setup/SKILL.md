@@ -22,7 +22,7 @@ Walk the user through getting gcenv configured. This skill is user-invocable onl
    - `gcloud auth login` — for the user account
    - `gcloud auth application-default login` — for ADC (used by Python/Go/Terraform)
 
-   You cannot complete these steps for them. Tell them clearly that browser tabs will open and they need to click through. If they decline, remind them to run `gcenv login <name>` later.
+   You cannot complete these steps for them. Tell them clearly that browser tabs will open and they need to click through. If they decline, remind them to run `gcenv login <name>` later. **Pass `timeout: 600000` to the Bash tool** when running `gcenv add` (or `gcenv login`) — the OAuth call blocks until the user signs in, and the default 2-minute timeout is often too tight.
 
 6. **Scope the current session.** After the profile is created, run `gcenv claude use <name>` and confirm with `gcenv claude show`.
 
