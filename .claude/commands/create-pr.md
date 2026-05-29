@@ -1,26 +1,26 @@
 ---
-description: Open a PR from the current feature branch to develop, with an auto-drafted changeset for the release notes.
+description: Open a PR from the current feature branch to main, with an auto-drafted changeset for the release notes.
 argument-hint: [optional intent hint, e.g. "this is a breaking rename of X"]
 ---
 
-Open a pull request from the current feature branch into `develop`, and add a changeset file capturing the release-note prose for this change. The changeset will later be aggregated into `CHANGELOG.md` by `/create-release`.
+Open a pull request from the current feature branch into `main`, and add a changeset file capturing the release-note prose for this change. The changeset will later be aggregated into `CHANGELOG.md` by `/create-release`.
 
-This command assumes [git flow](https://nvie.com/posts/a-successful-git-branching-model/) (`feature/* → develop → release/* → main`) and [`@changesets/cli`](https://github.com/changesets/changesets).
+This command assumes [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) (`feature/* → main`, releases cut from `main` via tags) and [`@changesets/cli`](https://github.com/changesets/changesets).
 
 ## Procedure
 
 1. **Gather context.** Run in parallel:
-   - `git branch --show-current` — must not be `main`, `master`, `develop`, or `release/*`. Refuse and ask if it is.
+   - `git branch --show-current` — must not be `main` or `master`. Refuse and ask if it is.
    - `git status` (no `-uall`) — working tree should be clean or contain only intentional changes for this PR.
-   - `git fetch origin develop main --quiet` — make sure local refs are current.
-   - `git log --oneline origin/develop..HEAD` — commits unique to this branch.
-   - `git diff origin/develop...HEAD --stat` and `git diff origin/develop...HEAD` — full diff vs the merge-base with develop. **This is the input you will summarize for the changeset.**
+   - `git fetch origin main --quiet` — make sure local refs are current.
+   - `git log --oneline origin/main..HEAD` — commits unique to this branch.
+   - `git diff origin/main...HEAD --stat` and `git diff origin/main...HEAD` — full diff vs the merge-base with main. **This is the input you will summarize for the changeset.**
    - `ls .changeset/ 2>/dev/null` and `test -f package.json && cat package.json | grep '"name"'` — confirm Changesets is initialized.
-   - `git ls-remote --exit-code --heads origin develop` — confirm `develop` exists on the remote.
+   - `git ls-remote --exit-code --heads origin main` — confirm `main` exists on the remote.
 
 2. **Refuse to proceed if preconditions fail.** Tell the user and stop:
-   - On a protected branch (`main`/`master`/`develop`/`release/*`).
-   - `develop` does not exist on origin → instruct: `git checkout -b develop && git push -u origin develop`.
+   - On a protected branch (`main`/`master`).
+   - `main` does not exist on origin → this repo isn't set up the way the command expects; tell the user and stop.
    - No `.changeset/` directory → instruct: `npx @changesets/cli@latest init`, commit, then re-run.
    - No `package.json` → Changesets needs one to track the version. Instruct: `npm init -y` (or `pnpm init`), set `"version"` to match the project's current release, commit, then re-run.
    - Working tree dirty with unrelated work → ask which files belong in this PR.
@@ -71,10 +71,10 @@ This command assumes [git flow](https://nvie.com/posts/a-successful-git-branchin
 
 8. **Push.** If the branch has no upstream: `git push -u origin <branch>`. Otherwise plain `git push`. Never `--force` without explicit user request.
 
-9. **Open the PR with `gh`.** Base must be `develop`. Title and body follow the same rules as `/commit`'s subject and body — explain *what* and *why*, not *how*. The body must include a **Release notes** section that mirrors the changeset (so reviewers see it without opening the file):
+9. **Open the PR with `gh`.** Base must be `main`. Title and body follow the same rules as `/commit`'s subject and body — explain *what* and *why*, not *how*. The body must include a **Release notes** section that mirrors the changeset (so reviewers see it without opening the file):
 
    ```bash
-   gh pr create --base develop --title "<imperative subject, ≤72 chars>" --body "$(cat <<'EOF'
+   gh pr create --base main --title "<imperative subject, ≤72 chars>" --body "$(cat <<'EOF'
    ## Summary
    <1–3 bullets — why this change exists>
 
@@ -97,7 +97,7 @@ This command assumes [git flow](https://nvie.com/posts/a-successful-git-branchin
 
 - **Do not edit `CHANGELOG.md` directly in this PR.** That's `/create-release`'s job. Editing here causes merge conflicts on every parallel PR.
 - **Do not include unrelated changes** when staging the changeset commit.
-- **Do not target `main`.** Always `develop`. If the user wants a hotfix, that's a different flow (`hotfix/* → main`) and is out of scope for this command.
+- **Do not commit directly to `main`.** Every change lands via a PR, even solo — the PR is where the changeset and a final review live.
 - **Do not invent a version number.** Changesets computes the next version at release time from the accumulated bump types — your job here is only to declare the bump *type*, not the number.
 
 ## References
@@ -105,4 +105,4 @@ This command assumes [git flow](https://nvie.com/posts/a-successful-git-branchin
 - [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) — the changelog format the aggregated `CHANGELOG.md` follows.
 - [Changesets — Adding a changeset](https://github.com/changesets/changesets/blob/main/docs/adding-a-changeset.md) — the `.changeset/*.md` file format.
 - [Semantic Versioning 2.0.0](https://semver.org/) — the rules behind `major`/`minor`/`patch`.
-- [A successful Git branching model](https://nvie.com/posts/a-successful-git-branching-model/) — git flow.
+- [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) — the single-trunk branching model.
