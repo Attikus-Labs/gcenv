@@ -2,4 +2,8 @@
 "gcenv": minor
 ---
 
-Use gcloud's loopback OAuth flow inside Claude Code instead of the copy-paste flow. Previously the plugin assumed any session with `CLAUDECODE=1` couldn't drive a browser-based login and forced `--no-launch-browser`, which is the one gcloud auth mode that actually requires stdin — so the user had to manually paste a verification code back into the agent. The loopback flow (gcloud's default `--launch-browser` mode) opens the default browser and reads the auth code from a `localhost` callback; no stdin needed. The plugin now detects whether a browser handler is available (`open` on macOS, `xdg-open` with a display server on Linux) and picks the right flow on that basis instead of on TTY status. Falls back to copy-paste only when there's truly no way to reach a browser (headless containers, SSH without X forwarding). The companion `gcenv` skill picks up a note telling Claude to use a 10-minute timeout when running auth commands so they don't get killed while the user is signing in.
+Use gcloud's loopback OAuth flow for `gcenv login`/`use`/`reauth` inside Claude Code.
+
+- Your browser opens and the auth code is read from a `localhost` callback — no more copy-pasting a verification code back into the agent.
+- gcenv now picks the flow based on whether a browser is reachable (`open` on macOS, `xdg-open` + a display server on Linux) rather than on TTY status, and falls back to copy-paste only on truly headless hosts.
+- The `gcenv` skill now hints Claude to use a 10-minute timeout for auth commands so they aren't killed mid sign-in.
