@@ -99,6 +99,24 @@ gcenv list                            # see all profiles ('*' marks active in th
 
 > **Prefer to clone yourself?** `git clone https://github.com/Attikus-Labs/gcenv.git ~/gcenv && ~/gcenv/install.sh` does the same thing.
 
+## Updating
+
+Your shell sources gcenv live from the checkout the installer created (`~/.gcenv-src` by default, or `$GCENV_INSTALL_DIR` if you set one). There's no rebuild step — pulling the latest commit is enough.
+
+```bash
+git -C ~/.gcenv-src pull --ff-only
+```
+
+Open a new terminal tab (or `source ~/.zshrc` / `source ~/.bashrc`) to pick up the changes.
+
+Re-running the curl installer works too and is idempotent — it detects the existing checkout, fast-forwards it, and re-runs the shell-rc / Powerlevel10k wiring in case any of that has changed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh | bash
+```
+
+The Claude Code plugin is updated separately — see [Updating the plugin](#updating-the-plugin).
+
 ## Commands
 
 | Command | Description |
@@ -139,7 +157,7 @@ That's it. The plugin gives you:
 
 > Eventually `gcenv` will be on the official `claude-plugins-official` marketplace for a one-command install (`claude /plugin install gcenv@claude-plugins-official`). Until then, the two-command form above is the install path.
 
-### Updating
+### Updating the plugin
 
 To pull the latest gcenv into a Claude session that already has the plugin installed:
 
@@ -158,6 +176,24 @@ If for some reason the in-place update doesn't take effect, the fallback is a fu
 /plugin uninstall gcenv
 /plugin install gcenv@gcenv
 /reload-plugins
+```
+
+### Local plugin development
+
+If you're working on the plugin itself and want Claude Code to load your uncommitted changes, swap the marketplace clone for a symlink to your working tree:
+
+```bash
+mv ~/.claude/plugins/marketplaces/gcenv ~/.claude/plugins/marketplaces/gcenv.bak
+ln -s /path/to/your/gcenv-checkout ~/.claude/plugins/marketplaces/gcenv
+```
+
+Then `/reload-plugins` in any Claude session to pick up edits. Re-run it after each change to `gcenv.sh`, hooks, or skills.
+
+To restore the normal marketplace-managed clone:
+
+```bash
+rm ~/.claude/plugins/marketplaces/gcenv
+mv ~/.claude/plugins/marketplaces/gcenv.bak ~/.claude/plugins/marketplaces/gcenv
 ```
 
 ### Day-to-day usage
