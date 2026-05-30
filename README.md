@@ -84,6 +84,13 @@ curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh 
 
 This clones gcenv to `~/.gcenv-src` (override with `GCENV_INSTALL_DIR=...`), wires up your shell, sets up the prompt segment, and offers to also install gcenv as a Claude Code plugin if `claude` is on your PATH.
 
+The plugin prompt is interactive even over `curl | bash` (it reads from your terminal). To answer it ahead of time — e.g. in CI or an unattended install — set `GCENV_INSTALL_PLUGIN`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh | GCENV_INSTALL_PLUGIN=1 bash   # install the plugin, no prompt
+curl -fsSL https://raw.githubusercontent.com/Attikus-Labs/gcenv/main/install.sh | GCENV_INSTALL_PLUGIN=0 bash   # skip the plugin, no prompt
+```
+
 The installer auto-detects your shell:
 - **Powerlevel10k** — adds a `☁️ profile` segment to your right prompt
 - **zsh + oh-my-zsh** — symlinks as a plugin with prompt integration

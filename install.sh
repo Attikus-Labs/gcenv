@@ -245,8 +245,33 @@ install_claude_plugin() {
 
   echo ""
   echo "Detected Claude Code on PATH."
-  echo -n "Also install gcenv as a Claude Code plugin? (y/N) "
-  read -r answer
+
+  local answer=""
+  if [[ -n "${GCENV_INSTALL_PLUGIN:-}" ]]; then
+    # Non-interactive opt-in/opt-out (CI, or `curl | bash` automation):
+    #   GCENV_INSTALL_PLUGIN=1  -> install without prompting
+    #   GCENV_INSTALL_PLUGIN=0  -> skip without prompting
+    case "$GCENV_INSTALL_PLUGIN" in
+      1|y|Y|yes|Yes|YES|true|True) answer="y" ;;
+      *)                           answer="n" ;;
+    esac
+    echo "Also install gcenv as a Claude Code plugin? (y/N) $answer  [GCENV_INSTALL_PLUGIN=$GCENV_INSTALL_PLUGIN]"
+  else
+    echo -n "Also install gcenv as a Claude Code plugin? (y/N) "
+    # Under `curl ... | bash`, fd 0 is the pipe carrying this script, not the
+    # keyboard, so a plain `read` consumes leftover script text (or hits EOF)
+    # instead of waiting for the user. Read from the controlling terminal when
+    # stdin isn't interactive; if there's no terminal at all, keep the default.
+    if [[ -t 0 ]]; then
+      read -r answer || answer=""
+    elif [[ -r /dev/tty ]]; then
+      read -r answer < /dev/tty || answer=""
+    else
+      echo ""
+      echo "  (no terminal for prompt; skipping — set GCENV_INSTALL_PLUGIN=1 to install non-interactively)"
+    fi
+  fi
+
   if [[ ! "$answer" =~ ^[Yy] ]]; then
     return 0
   fi
