@@ -162,7 +162,7 @@ That's it. The plugin gives you:
 - A `/gcenv:setup` slash command that walks first-time users through profile creation.
 - The `gcenv` binary on PATH inside Claude sessions.
 
-> Eventually `gcenv` will be on the official `claude-plugins-official` marketplace for a one-command install (`claude /plugin install gcenv@claude-plugins-official`). Until then, the two-command form above is the install path.
+> Eventually `gcenv` will be on the official `claude-plugins-official` marketplace for a one-command install (`claude plugin install gcenv@claude-plugins-official`). Until then, the two-command form above is the install path.
 
 ### Updating the plugin
 

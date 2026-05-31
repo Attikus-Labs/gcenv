@@ -298,19 +298,22 @@ install_claude_plugin() {
     echo "  (using local repo path; once this is on GitHub, re-run for the canonical install)"
   fi
 
+  # Use the `claude plugin ...` CLI subcommands, NOT `claude /plugin ...`. The
+  # slash form is an in-session slash command: passing it on the shell launches
+  # the interactive plugin-manager TUI instead of doing a headless install.
   echo "  Adding marketplace: $marketplace_source"
-  if ! claude /plugin marketplace add "$marketplace_source"; then
-    echo "gcenv: 'claude /plugin marketplace add' failed." >&2
+  if ! claude plugin marketplace add "$marketplace_source"; then
+    echo "gcenv: 'claude plugin marketplace add' failed." >&2
     echo "  Try manually:" >&2
-    echo "    claude /plugin marketplace add $marketplace_source" >&2
-    echo "    claude /plugin install gcenv@gcenv" >&2
+    echo "    claude plugin marketplace add $marketplace_source" >&2
+    echo "    claude plugin install gcenv@gcenv" >&2
     return 0
   fi
 
   echo "  Installing plugin: gcenv@gcenv"
-  if ! claude /plugin install gcenv@gcenv; then
-    echo "gcenv: 'claude /plugin install' failed." >&2
-    echo "  Try manually:  claude /plugin install gcenv@gcenv" >&2
+  if ! claude plugin install gcenv@gcenv; then
+    echo "gcenv: 'claude plugin install' failed." >&2
+    echo "  Try manually:  claude plugin install gcenv@gcenv" >&2
     return 0
   fi
 
