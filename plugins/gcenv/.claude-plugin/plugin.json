@@ -1,7 +1,7 @@
 {
   "name": "gcenv",
   "description": "Per-terminal and per-Claude-session GCP profile isolation. Switch gcloud accounts/projects/ADC without clobbering other tabs or Claude sessions.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": {
     "name": "Attikus-Labs"
   },
