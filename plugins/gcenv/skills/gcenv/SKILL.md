@@ -27,9 +27,14 @@ The active profile for this Claude session is determined in this order:
 
 If the hook config was installed with `--pin <profile>`, that profile overrides everything above. The user typically uses `--pin` only in customer-facing repos.
 
+## Invoking gcenv
+
+- **Call it as the bare command `gcenv`.** The plugin's SessionStart hook puts `gcenv` on PATH for every Bash call in this session. Do not go looking for the binary, and **never** hardcode a version-pinned cache path like `~/.claude/plugins/cache/gcenv/gcenv/0.4.1/bin/gcenv` — that path changes on every update and will break. If `gcenv` is genuinely not found, the PATH setup hasn't taken effect (rare) — ask the user to restart Claude Code, which re-fires the hook. Don't substitute a hardcoded path.
+- **Don't use the `timeout` command** to guard gcenv calls — it isn't installed on macOS. If you need a longer or shorter limit, pass the Bash tool's own `timeout` parameter instead.
+
 ## Commands
 
-Run these via the standard Bash tool. The `gcenv` binary is on PATH after the plugin is installed.
+Run these via the standard Bash tool.
 
 | Command | What it does |
 |---|---|
@@ -37,16 +42,16 @@ Run these via the standard Bash tool. The `gcenv` binary is on PATH after the pl
 | `gcenv claude show` | Show which profile is active for this session. |
 | `gcenv claude use <name>` | Set the active profile for the rest of this session. |
 | `gcenv claude off` | Clear the active profile (commands run unscoped). |
-| `gcenv add <name>` | Interactive: create a new profile (prompts for account email, picks from available projects, optionally authenticates). |
+| `gcenv add <name> --account=<email> --project=<id> --no-auth` | Create a new profile non-interactively. Always pass `--account`, `--project`, and `--no-auth` inside Claude — the interactive picker and browser auth can't be driven from here. |
 | `gcenv current` | Show what's set in this terminal's env (mostly relevant outside Claude). |
 
 ## Behavior rules
 
-1. **Never run `gcloud auth login`, `gcloud auth application-default login`, or `gcloud config set` directly inside Claude.** Those are global, machine-wide changes that will leak out of this session and clobber other terminals. Use `gcenv` commands instead. If the user genuinely needs to re-auth, run `gcenv login <profile>` (which scopes the auth to the profile's ADC file).
+1. **Never run `gcloud auth login`, `gcloud auth application-default login`, or `gcloud config set` directly inside Claude.** Those are global, machine-wide changes that will leak out of this session and clobber other terminals. Use `gcenv` commands instead. If the user genuinely needs to re-auth, have them run `gcenv login <profile>` in their **own terminal** (it scopes the auth to the profile's ADC file; browser OAuth can't complete inside Claude — see rule 3).
 
 2. **Confirm the active profile before destructive GCP work.** Before `gcloud compute instances delete`, `terraform apply`, `bq rm`, or any production-affecting command, run `gcenv claude show` and confirm with the user.
 
-3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected. If a profile is selected and auth still fails, run `gcenv login <profile>` — on a desktop machine this opens the user's browser and returns automatically once they sign in. Pass `timeout: 600000` (10 minutes) to the Bash tool when invoking auth commands so the call doesn't time out while the user is signing in. Auth commands that may need this: `gcenv login`, `gcenv reauth`, `gcenv use` (when the profile's token has expired), and `gcenv add` (when the user accepts the "Authenticate now?" prompt).
+3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected — if so, ask the user which profile to use and run `gcenv claude use <name>`. **If a profile is selected and auth still fails, do not try to authenticate from inside Claude Code.** Browser OAuth can't complete in the Bash sandbox (no browser, and `gcloud` itself may be un-executable here, e.g. an SDK under `~/Downloads` that macOS blocks). Instead, tell the user to run `gcenv login <profile>` in their **own terminal** and report back once it succeeds. Only attempt `gcenv login`/`gcenv reauth` in-session if the user explicitly asks you to and you've confirmed `gcloud` runs here — and then pass the Bash tool's `timeout: 600000` so the call doesn't cut off mid-sign-in.
 
 4. **If the user asks to "switch projects",** run `gcenv claude use <name>`. Do NOT run `gcloud config set project <id>`. The two are not equivalent: `gcenv claude use` also handles the account, the billing quota project, and the ADC file; `gcloud config set` mutates global state.
 
@@ -79,10 +84,11 @@ gcenv claude show
 
 ### "Add a new project / customer"
 
-Invoke the `/gcenv:setup` skill, or run:
+Invoke the `/gcenv:setup` skill, or run it non-interactively:
 
 ```
-gcenv add <name>
+gcenv add <name> --account=<email> --project=<project-id> --no-auth
+gcenv claude use <name>
 ```
 
-…and follow the interactive prompts. The user must complete the browser auth step themselves.
+Then tell the user to authenticate from their **own terminal** with `gcenv login <name>` (browser OAuth can't complete inside Claude). Don't pipe `y` answers into `gcenv add`, and don't try to drive the browser yourself.

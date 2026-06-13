@@ -37,6 +37,30 @@ _gcenv_validate_name() {
   fi
 }
 
+# Reject control characters in values that get written into a profile file.
+# A newline in an account/project value would inject a second KEY=value line;
+# the last-wins parser in _gcenv_read_profile would then silently redirect the
+# active project (a credential/quota-project hijack). Rejecting control chars
+# also keeps these values safe to echo into the Claude Code context block.
+_gcenv_validate_field() {
+  local label="$1" value="$2"
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    echo "gcenv: invalid $label (control characters are not allowed)" >&2
+    return 1
+  fi
+}
+
+# Fail fast instead of blocking on `read` when there is no interactive terminal
+# (e.g. inside Claude Code's Bash tool, where stdin is not a TTY). The caller
+# must supply the value via a flag/argument. Without this, an interactive prompt
+# would hang the non-interactive call until it times out.
+_gcenv_require_tty() {
+  if [[ ! -t 0 ]]; then
+    echo "gcenv: $1 — no interactive terminal here, so pass it as a flag/argument." >&2
+    return 1
+  fi
+}
+
 _gcenv_help() {
   cat <<'EOF'
 Usage: gcenv <command> [args]
@@ -56,9 +80,13 @@ Commands:
 Options for 'add':
   --account=EMAIL    GCP account email
   --project=ID       GCP project ID
+  --auth             Authenticate immediately after creating the profile
+  --no-auth          Skip authentication (default on a non-interactive shell,
+                     e.g. inside Claude Code; run 'gcenv login <name>' later)
 
 Examples:
   gcenv add prod --account=me@company.com --project=my-project
+  gcenv add prod --account=me@company.com --project=my-project --no-auth
   gcenv use prod
   gcenv list
   gcenv claude init                # install Claude Code hook (this repo)
@@ -202,19 +230,22 @@ EOF
 }
 
 _gcenv_add() {
-  local name="" account="" project=""
+  local name="" account="" project="" auth_mode=""
 
   # Parse arguments
   for arg in "$@"; do
     case "$arg" in
       --account=*) account="${arg#--account=}" ;;
       --project=*) project="${arg#--project=}" ;;
+      --auth)      auth_mode="yes" ;;
+      --no-auth)   auth_mode="no" ;;
       -*) echo "gcenv: unknown option '$arg'" >&2; return 1 ;;
       *) [[ -z "$name" ]] && name="$arg" ;;
     esac
   done
 
   if [[ -z "$name" ]]; then
+    _gcenv_require_tty "a profile name is required" || return 1
     echo -n "Profile name: "
     read -r name
   fi
@@ -232,11 +263,15 @@ _gcenv_add() {
   fi
 
   if [[ -z "$account" ]]; then
+    _gcenv_require_tty "--account=EMAIL is required" || return 1
     echo -n "GCP account email: "
     read -r account
   fi
 
   if [[ -z "$project" ]]; then
+    # The project picker below is interactive (it prompts for a selection or a
+    # manual ID). Don't enter it without a TTY — require --project instead.
+    _gcenv_require_tty "--project=ID is required (the interactive project picker can't run here)" || return 1
     echo "Fetching projects for $account..."
     local projects=()
     while IFS= read -r line; do
@@ -283,6 +318,9 @@ _gcenv_add() {
     return 1
   fi
 
+  _gcenv_validate_field "account" "$account" || return 1
+  _gcenv_validate_field "project" "$project" || return 1
+
   _gcenv_ensure_dirs
 
   cat > "$(_gcenv_profile_path "$name")" <<EOF
@@ -295,12 +333,35 @@ EOF
   echo "  Project: $project"
   echo ""
 
-  echo -n "Authenticate now? (y/N) "
-  read -r answer
-  if [[ "$answer" =~ ^[Yy] ]]; then
+  # Decide whether to authenticate now.
+  #   --auth     → always
+  #   --no-auth  → never
+  #   (default)  → ask, but only on an interactive TTY. Inside Claude Code (and
+  #                any non-interactive caller) stdin is not a TTY, so we must not
+  #                block on `read`: it would hang, or mis-consume piped input. In
+  #                that case default to "no" and print the next step — the agent
+  #                can then hand the browser auth to the user instead of trying
+  #                (and failing) to drive OAuth itself.
+  local do_auth answer
+  case "$auth_mode" in
+    yes) do_auth=1 ;;
+    no)  do_auth=0 ;;
+    *)
+      if [[ -t 0 ]]; then
+        echo -n "Authenticate now? (y/N) "
+        read -r answer
+        if [[ "$answer" =~ ^[Yy] ]]; then do_auth=1; else do_auth=0; fi
+      else
+        do_auth=0
+      fi
+      ;;
+  esac
+
+  if (( do_auth )); then
     _gcenv_login "$name"
   else
-    echo "Run 'gcenv login $name' later to authenticate."
+    echo "Run 'gcenv login $name' to authenticate (opens a browser; if you're"
+    echo "inside Claude Code, run it in your own terminal — OAuth needs the browser)."
   fi
 }
 
@@ -503,6 +564,9 @@ _gcenv_edit() {
   read -r new_project
   [[ -n "$new_project" ]] && GCENV_PROJECT="$new_project"
 
+  _gcenv_validate_field "account" "$GCENV_ACCOUNT" || return 1
+  _gcenv_validate_field "project" "$GCENV_PROJECT" || return 1
+
   cat > "$(_gcenv_profile_path "$name")" <<EOF
 GCENV_ACCOUNT=$GCENV_ACCOUNT
 GCENV_PROJECT=$GCENV_PROJECT
@@ -520,8 +584,14 @@ EOF
 
 # Resolve a sanitized session id for state-file naming. Falls back to "default"
 # so the same commands work outside Claude (e.g. plain shell scripts).
+#
+# Claude Code exposes the session id as CLAUDE_CODE_SESSION_ID. (Older/other
+# names are kept as fallbacks.) This MUST match the `session_id` the PreToolUse
+# hook receives in its payload — otherwise `gcenv claude use` would write a
+# state file under one key while the hook looks it up under another, collapsing
+# per-session isolation to the shared default.profile.
 _gcenv_claude_session_id() {
-  local sid="${CLAUDECODE_SESSION_ID:-${CLAUDE_SESSION_ID:-default}}"
+  local sid="${CLAUDE_CODE_SESSION_ID:-${CLAUDECODE_SESSION_ID:-${CLAUDE_SESSION_ID:-default}}}"
   [[ "$sid" =~ ^[A-Za-z0-9_.-]+$ ]] || sid="default"
   echo "$sid"
 }
@@ -530,13 +600,38 @@ _gcenv_claude_state_path() {
   echo "$GCENV_CLAUDE_DIR/$1.profile"
 }
 
-# Print the active profile for a session, falling back to the default file.
-# Returns 0 with profile on stdout if found, 1 otherwise.
+# Find a `.gcenv-profile` file in $PWD or any ancestor directory. Mirrors
+# _gcenv_hook_repo_profile in hooks/gcenv-pretooluse.sh — keep the two in sync so
+# `gcenv claude show` reports the same profile the hook actually enforces.
+_gcenv_claude_repo_profile() {
+  local dir="$PWD" hops=0 profile
+  while [[ -n "$dir" && "$dir" != "/" && "$hops" -lt 64 ]]; do
+    if [[ -f "$dir/.gcenv-profile" ]]; then
+      profile="$(head -n1 "$dir/.gcenv-profile" 2>/dev/null | tr -d '[:space:]')"
+      if [[ "$profile" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "$profile"
+        return 0
+      fi
+      return 1
+    fi
+    dir="$(dirname "$dir")"
+    hops=$((hops + 1))
+  done
+  return 1
+}
+
+# Print the active profile for a session. Resolution order MUST match the
+# PreToolUse hook (_gcenv_hook_active_profile): per-session state file, then a
+# repo .gcenv-profile, then the global default file. Returns 0 with the profile
+# on stdout if found, 1 otherwise.
 _gcenv_claude_active_profile() {
   local sid="$1" f
   f="$(_gcenv_claude_state_path "$sid")"
   if [[ -f "$f" ]]; then
     cat "$f"
+    return 0
+  fi
+  if _gcenv_claude_repo_profile; then
     return 0
   fi
   f="$(_gcenv_claude_state_path "default")"

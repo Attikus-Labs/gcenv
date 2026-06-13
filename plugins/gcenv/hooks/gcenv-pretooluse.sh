@@ -217,4 +217,10 @@ main() {
   fi
 }
 
-main "$@"
+# Only auto-run when executed directly. The SessionStart hook sources this file
+# to reuse the profile-resolution helpers (_gcenv_hook_active_profile et al.) so
+# that what it reports always matches what this hook will actually enforce — it
+# must not trigger the PreToolUse flow on source.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
