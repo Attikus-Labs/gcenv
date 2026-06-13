@@ -1,6 +1,18 @@
 {
-  "description": "Scope GCP commands (gcloud, gsutil, bq, terraform, kubectl, helm) to the active gcenv profile so Claude Code never accidentally crosses GCP accounts.",
+  "description": "Scope GCP commands (gcloud, gsutil, bq, terraform, kubectl, helm) to the active gcenv profile so Claude Code never accidentally crosses GCP accounts, and tell the agent at session start that gcenv is here and how to use it.",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/gcenv-sessionstart.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",

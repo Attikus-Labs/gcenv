@@ -14,15 +14,25 @@ Walk the user through getting gcenv configured. This skill is user-invocable onl
 
 2. **Pick a name.** If creating a new profile, ask the user what to call it. Suggest names that map to the GCP project's role rather than its ID — e.g. `prod`, `staging`, `client-a`, `personal`. Validate that the name is `[A-Za-z0-9_-]+` (gcenv enforces this; warn early so the user doesn't get a confusing error).
 
-3. **Ask for the account email.** This is the Google account they sign in with for that project (e.g. `me@company.com`). It is *not* the project ID.
+3. **Ask for the account email AND the project ID.** The account is the Google account they sign in with (e.g. `me@company.com`); it is *not* the project ID. You need **both** before calling `gcenv add` — see the next step for why. If the user doesn't know the project ID, ask them to find it (the GCP console, or `gcloud projects list` in their own terminal) and give it to you. Don't try to discover it via `gcenv add` itself.
 
-4. **Run `gcenv add <name> --account=<email>`.** gcenv will fetch the list of projects accessible to that account and let the user choose one. If the user is not yet authenticated for that account, the listing may be empty — in that case, tell them you'll need to authenticate first. Run `gcenv add <name> --account=<email> --project=<project-id>` if the user already knows the project ID.
+4. **Create the profile non-interactively.** Run, with all three flags:
 
-5. **Authenticate.** When `gcenv add` prompts `Authenticate now? (y/N)`, recommend `y`. The user will need to complete two browser steps:
-   - `gcloud auth login` — for the user account
-   - `gcloud auth application-default login` — for ADC (used by Python/Go/Terraform)
+   ```
+   gcenv add <name> --account=<email> --project=<project-id> --no-auth
+   ```
 
-   You cannot complete these steps for them. Tell them clearly that browser tabs will open and they need to click through. If they decline, remind them to run `gcenv login <name>` later. **Pass `timeout: 600000` to the Bash tool** when running `gcenv add` (or `gcenv login`) — the OAuth call blocks until the user signs in, and the default 2-minute timeout is often too tight.
+   `--account` and `--project` are **both required** inside Claude Code. Without `--project`, `gcenv add` falls back to an interactive project picker (or a manual "enter project ID" prompt) that can't be answered from a non-interactive Bash call — it will block until the tool times out. `--no-auth` makes gcenv create the profile and stop cleanly instead of attempting a browser sign-in. (`gcenv add` already defaults to no-auth on a non-interactive shell, but pass it explicitly so the intent is clear.)
+
+   Never pipe answers into `gcenv add` (e.g. `printf 'y\n' | gcenv add ...`) — use the flags instead.
+
+5. **Authenticate (the user does this, not you).** Browser OAuth cannot complete inside a Claude Code Bash call — the sandbox has no browser and may not even be able to exec `gcloud`. So do **not** run `gcenv login` / `gcenv add --auth` yourself. Instead, tell the user to run this in their **own terminal**:
+
+   ```
+   gcenv login <name>
+   ```
+
+   That opens two browser steps — `gcloud auth login` (user account) and `gcloud auth application-default login` (ADC, used by Python/Go/Terraform) — which only they can click through. Once they confirm it succeeded, continue.
 
 6. **Scope the current session.** After the profile is created, run `gcenv claude use <name>` and confirm with `gcenv claude show`.
 
