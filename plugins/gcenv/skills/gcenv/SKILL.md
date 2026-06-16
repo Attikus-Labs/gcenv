@@ -47,11 +47,16 @@ Run these via the standard Bash tool.
 
 ## Behavior rules
 
-1. **Never run `gcloud auth login`, `gcloud auth application-default login`, or `gcloud config set` directly inside Claude.** Those are global, machine-wide changes that will leak out of this session and clobber other terminals. Use `gcenv` commands instead. If the user genuinely needs to re-auth, have them run `gcenv login <profile>` in their **own terminal** (it scopes the auth to the profile's ADC file; browser OAuth can't complete inside Claude — see rule 3).
+1. **Never run *raw* `gcloud auth login`, `gcloud auth application-default login`, or `gcloud config set` inside Claude.** Those are global, machine-wide changes that leak out of this session and clobber other terminals. Use `gcenv` commands instead. To re-authenticate, use `gcenv login <profile>` — the gcenv wrapper that runs the auth and copies the result into the profile's own ADC file. Unlike raw `gcloud auth login`, it **can** run in-session on a machine with a browser (see rule 3).
 
 2. **Confirm the active profile before destructive GCP work.** Before `gcloud compute instances delete`, `terraform apply`, `bq rm`, or any production-affecting command, run `gcenv claude show` and confirm with the user.
 
-3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected — if so, ask the user which profile to use and run `gcenv claude use <name>`. **If a profile is selected and auth still fails, do not try to authenticate from inside Claude Code.** Browser OAuth can't complete in the Bash sandbox (no browser, and `gcloud` itself may be un-executable here, e.g. an SDK under `~/Downloads` that macOS blocks). Instead, tell the user to run `gcenv login <profile>` in their **own terminal** and report back once it succeeds. Only attempt `gcenv login`/`gcenv reauth` in-session if the user explicitly asks you to and you've confirmed `gcloud` runs here — and then pass the Bash tool's `timeout: 600000` so the call doesn't cut off mid-sign-in.
+3. **If a GCP command fails with auth errors,** check `gcenv claude show` first. The most likely cause is no profile selected — if so, ask the user which profile to use and run `gcenv claude use <name>`. **If a profile is selected and auth still fails, the fix is `gcenv login <profile>`.** On a machine with a browser (the normal local case) you can run it **in-session** — gcenv uses loopback OAuth: gcloud opens the browser (or prints a URL to click) and reads the code from a localhost callback, so no TTY/stdin is needed. "No TTY" is not "no browser." Requirements and caveats:
+   - Pass the Bash tool's `timeout: 600000` so the call isn't killed while the user signs in (a full login is two browser steps: user account + ADC).
+   - **Confirm with the user first** — it opens a browser on their screen and overwrites the global default ADC (`~/.config/gcloud/application_default_credentials.json`).
+   - First confirm `gcloud` actually runs here (`gcloud --version`).
+   - If the bare command errors with `command not found: _gcenv_*`, the shell snapshot captured a partial `gcenv` function — rerun as `command gcenv login <profile>` (forces the on-PATH binary).
+   - Hand off to the user's **own terminal** only if the environment is genuinely headless (a remote container with no browser) — not by default.
 
 4. **If the user asks to "switch projects",** run `gcenv claude use <name>`. Do NOT run `gcloud config set project <id>`. The two are not equivalent: `gcenv claude use` also handles the account, the billing quota project, and the ADC file; `gcloud config set` mutates global state.
 
@@ -91,4 +96,4 @@ gcenv add <name> --account=<email> --project=<project-id> --no-auth
 gcenv claude use <name>
 ```
 
-Then tell the user to authenticate from their **own terminal** with `gcenv login <name>` (browser OAuth can't complete inside Claude). Don't pipe `y` answers into `gcenv add`, and don't try to drive the browser yourself.
+Then authenticate with `gcenv login <name>`. On a machine with a browser you can run this in-session with `timeout: 600000` (loopback OAuth opens the browser or prints a URL to click) — confirm with the user first, since it overwrites the global default ADC. Hand off to the user's own terminal only if the environment is genuinely headless. Don't pipe `y` answers into `gcenv add`.
