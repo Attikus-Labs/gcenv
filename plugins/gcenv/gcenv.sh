@@ -360,8 +360,10 @@ EOF
   if (( do_auth )); then
     _gcenv_login "$name"
   else
-    echo "Run 'gcenv login $name' to authenticate (opens a browser; if you're"
-    echo "inside Claude Code, run it in your own terminal — OAuth needs the browser)."
+    echo "Run 'gcenv login $name' to authenticate — it opens your browser via"
+    echo "loopback OAuth, so it works in a non-TTY shell (incl. Claude Code; give"
+    echo "it a 10-minute timeout). Only on a truly headless host with no browser"
+    echo "do you need to run it somewhere a browser is available."
   fi
 }
 
@@ -875,6 +877,18 @@ EOF
 }
 
 gcenv() {
+  # Self-heal a partial load. Claude Code snapshots the user's interactive shell
+  # to seed its Bash tool, but the snapshot captures this public `gcenv` function
+  # WITHOUT the _gcenv_* helpers it calls — so a bare `gcenv <subcmd>` there dies
+  # with "command not found: _gcenv_login". When a helper is missing, delegate to
+  # the on-PATH binary (bin/gcenv, which the SessionStart hook prepends to PATH);
+  # it sources gcenv.sh fresh, defining every helper, then runs the command. In a
+  # normal terminal the helpers are present, so this guard never fires.
+  if ! typeset -f _gcenv_read_profile >/dev/null 2>&1; then
+    command gcenv "$@"
+    return
+  fi
+
   local command="${1:-help}"
   shift 2>/dev/null
 

@@ -26,13 +26,18 @@ Walk the user through getting gcenv configured. This skill is user-invocable onl
 
    Never pipe answers into `gcenv add` (e.g. `printf 'y\n' | gcenv add ...`) — use the flags instead.
 
-5. **Authenticate (the user does this, not you).** Browser OAuth cannot complete inside a Claude Code Bash call — the sandbox has no browser and may not even be able to exec `gcloud`. So do **not** run `gcenv login` / `gcenv add --auth` yourself. Instead, tell the user to run this in their **own terminal**:
+5. **Authenticate with `gcenv login <name>`.** This runs two browser steps — `gcloud auth login` (user account) and `gcloud auth application-default login` (ADC, used by Python/Go/Terraform). gcenv uses loopback OAuth, so on a machine with a browser it works **in-session**: gcloud opens the browser (or prints a URL to click) and reads the code from a localhost callback — no TTY needed.
 
    ```
    gcenv login <name>
    ```
 
-   That opens two browser steps — `gcloud auth login` (user account) and `gcloud auth application-default login` (ADC, used by Python/Go/Terraform) — which only they can click through. Once they confirm it succeeded, continue.
+   - Run it with the Bash tool's `timeout: 600000` so it isn't killed while the user signs in.
+   - **Confirm with the user first** — it opens a browser on their screen and overwrites the global default ADC (`~/.config/gcloud/application_default_credentials.json`).
+   - First confirm `gcloud` runs here (`gcloud --version`). If `gcenv` errors with `command not found: _gcenv_*`, rerun as `command gcenv login <name>`.
+   - Hand off to the user's **own terminal** only if the environment is genuinely headless (a remote container with no browser).
+
+   The user still has to be at their browser to click through both sign-in steps. Once they confirm it succeeded, continue.
 
 6. **Scope the current session.** After the profile is created, run `gcenv claude use <name>` and confirm with `gcenv claude show`.
 
@@ -40,6 +45,6 @@ Walk the user through getting gcenv configured. This skill is user-invocable onl
 
 ## Don't
 
-- Don't run `gcloud auth login` yourself. That's a `gcenv login` step (or a step inside `gcenv add`).
+- Don't run *raw* `gcloud auth login` yourself — use the `gcenv login` wrapper (or `gcenv add --auth`), which isolates the credentials into the profile's ADC file.
 - Don't write `gcloud config set ...` commands. Those are global and will leak out of this session.
-- Don't promise authentication will work without the user's input — the OAuth flow requires their browser.
+- Authentication still needs the user at their browser to sign in — confirm with them before launching `gcenv login`, and expect to wait while they complete the two sign-in steps.
