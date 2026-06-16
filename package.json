@@ -1,6 +1,6 @@
 {
   "name": "gcenv",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Per-terminal and per-Claude-session GCP profile isolation.",
   "homepage": "https://github.com/Attikus-Labs/gcenv",
