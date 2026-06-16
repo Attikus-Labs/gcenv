@@ -174,16 +174,18 @@ _gcenv_can_launch_browser() {
   esac
 }
 
-# Populate the caller's `nb_flag` array with the right gcloud auth flag for this
-# environment, and print a one-time banner explaining what's about to happen.
-# Caller contract: declare `local -a nb_flag=()` immediately before calling, so
-# the assignment lands in caller scope and doesn't leak to shell-global state.
+# Populate the caller's `nb_flag` and `browser_env` arrays for this environment,
+# and print a one-time banner explaining what's about to happen.
+# Caller contract: declare `local -a nb_flag=() browser_env=()` immediately
+# before calling. nb_flag is the gcloud auth flag; browser_env is an env-style
+# `BROWSER=<opener>` override (or empty) — invoke gcloud as
+# `env "${browser_env[@]}" gcloud auth ...` so the override is scoped per command.
 #
 # Decision matrix:
 #   TTY                              → no flag; gcloud auto-detects.
-#   non-TTY, browser available       → --launch-browser; gcloud opens the
-#                                      browser and reads the code from a
-#                                      localhost callback. No stdin needed.
+#   non-TTY, browser available       → --launch-browser + BROWSER=<opener>;
+#                                      gcloud opens the browser and reads the
+#                                      code from a localhost callback. No stdin.
 #   non-TTY, no browser (truly       → --no-launch-browser; copy-paste a URL
 #   headless, e.g. remote container)   and verification code by hand.
 #
@@ -191,14 +193,27 @@ _gcenv_can_launch_browser() {
 # detection silently falls back to copy-paste mode when stdin is not a TTY —
 # which buries the URL in an agent transcript when a browser was actually
 # available the whole time.
+#
+# We also force $BROWSER: gcloud launches the browser via Python's webbrowser
+# module, which obeys $BROWSER. Agent shells (e.g. Claude Code) export
+# BROWSER=true to suppress browser launches — that makes webbrowser run
+# `true <url>`, a silent no-op that reports success, so gcloud waits on the
+# loopback callback forever and nothing ever opens. Overriding BROWSER with the
+# real OS opener for just the auth command makes the browser actually pop.
 _gcenv_browser_setup() {
   if [[ -t 0 && -t 1 ]]; then
     nb_flag=()
+    browser_env=()
     return 0
   fi
 
   if _gcenv_can_launch_browser; then
     nb_flag=(--launch-browser)
+    case "$OSTYPE" in
+      darwin*)      browser_env=(BROWSER=open) ;;
+      linux*|*bsd*) browser_env=(BROWSER=xdg-open) ;;
+      *)            browser_env=() ;;
+    esac
     cat >&2 <<'EOF'
 gcenv: non-TTY shell with browser available — using loopback OAuth.
 
@@ -219,6 +234,7 @@ EOF
   fi
 
   nb_flag=(--no-launch-browser)
+  browser_env=()
   cat >&2 <<'EOF'
 gcenv: non-interactive shell, no browser detected — using copy-paste flow.
 
@@ -385,9 +401,9 @@ _gcenv_use() {
   # never-authenticated accounts; in both cases we want the same recovery path.
   if ! _gcenv_check_auth "$CLOUDSDK_CORE_ACCOUNT"; then
     echo "gcenv: no usable auth token for '$CLOUDSDK_CORE_ACCOUNT', authenticating..."
-    local -a nb_flag=()
+    local -a nb_flag=() browser_env=()
     _gcenv_browser_setup
-    if ! gcloud auth login "${nb_flag[@]}" "$CLOUDSDK_CORE_ACCOUNT"; then
+    if ! env "${browser_env[@]}" gcloud auth login "${nb_flag[@]}" "$CLOUDSDK_CORE_ACCOUNT"; then
       echo "gcenv: auth failed; run 'gcenv login $name' to retry" >&2
       return 1
     fi
@@ -489,18 +505,18 @@ _gcenv_login() {
   echo "Authenticating profile '$name' ($GCENV_ACCOUNT)..."
   echo ""
 
-  local -a nb_flag=()
+  local -a nb_flag=() browser_env=()
   _gcenv_browser_setup
 
   echo "==> Step 1/2: gcloud auth login"
-  if ! gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
+  if ! env "${browser_env[@]}" gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
     echo "gcenv: auth login failed" >&2
     return 1
   fi
 
   echo ""
   echo "==> Step 2/2: Application Default Credentials login"
-  if ! gcloud auth application-default login "${nb_flag[@]}" --billing-project="$GCENV_PROJECT"; then
+  if ! env "${browser_env[@]}" gcloud auth application-default login "${nb_flag[@]}" --billing-project="$GCENV_PROJECT"; then
     echo "gcenv: ADC login failed" >&2
     return 1
   fi
@@ -531,10 +547,10 @@ _gcenv_reauth() {
 
   echo "Reauthenticating profile '$name' ($GCENV_ACCOUNT)..."
 
-  local -a nb_flag=()
+  local -a nb_flag=() browser_env=()
   _gcenv_browser_setup
 
-  if ! gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
+  if ! env "${browser_env[@]}" gcloud auth login "${nb_flag[@]}" "$GCENV_ACCOUNT"; then
     echo "gcenv: reauth failed" >&2
     return 1
   fi
