@@ -56,6 +56,7 @@ Run these via the standard Bash tool.
    - **Confirm with the user first** — it opens a browser on their screen and overwrites the global default ADC (`~/.config/gcloud/application_default_credentials.json`).
    - First confirm `gcloud` actually runs here (`gcloud --version`).
    - If the bare command errors with `command not found: _gcenv_*`, the shell snapshot captured a partial `gcenv` function — rerun as `command gcenv login <profile>` (forces the on-PATH binary).
+   - gcenv sets the browser opener itself, so you don't need to prefix `BROWSER=...`. If login ever hangs with nothing opening, the launch was suppressed by the agent shell's `BROWSER=true` (gcloud opens the browser via Python's `webbrowser`, which obeys `$BROWSER`); rerun with `BROWSER=open` (macOS) or `BROWSER=xdg-open` (Linux).
    - Hand off to the user's **own terminal** only if the environment is genuinely headless (a remote container with no browser) — not by default.
 
 4. **If the user asks to "switch projects",** run `gcenv claude use <name>`. Do NOT run `gcloud config set project <id>`. The two are not equivalent: `gcenv claude use` also handles the account, the billing quota project, and the ADC file; `gcloud config set` mutates global state.
