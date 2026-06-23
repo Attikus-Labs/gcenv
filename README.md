@@ -305,6 +305,13 @@ If you skipped the installer or want to customize:
 RPROMPT='$(gcenv_prompt_info)'
 ```
 
+**Plain zsh (no framework)** — also enable `prompt_subst`, otherwise zsh prints the
+literal `$(gcenv_prompt_info)` instead of evaluating it:
+```zsh
+setopt prompt_subst
+RPROMPT='$(gcenv_prompt_info)'
+```
+
 ## Tab completion
 
 Completions are loaded automatically. Profile names auto-complete for `use`, `remove`, `login`, `reauth`, `edit`, and `claude use`.
