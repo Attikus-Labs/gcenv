@@ -170,10 +170,17 @@ install_rprompt() {
   local zshrc="$HOME/.zshrc"
   if grep -qF 'gcenv_prompt_info' "$zshrc" 2>/dev/null; then
     echo "RPROMPT gcenv_prompt_info already configured"
+    # Backfill prompt_subst for installs predating the setopt line, else zsh
+    # prints the literal $(gcenv_prompt_info) instead of evaluating it.
+    if ! grep -qiE '^[[:space:]]*setopt[[:space:]].*prompt_?subst' "$zshrc" 2>/dev/null; then
+      echo "setopt prompt_subst  # required for \$(...) in RPROMPT to be evaluated" >> "$zshrc"
+      echo "Backfilled setopt prompt_subst in $zshrc"
+    fi
     return
   fi
   echo "" >> "$zshrc"
   echo "# gcenv prompt (shows active gcloud profile)" >> "$zshrc"
+  echo "setopt prompt_subst  # required for \$(...) in RPROMPT to be evaluated" >> "$zshrc"
   echo "RPROMPT='\$(gcenv_prompt_info)'" >> "$zshrc"
   echo "Added RPROMPT with gcenv_prompt_info to $zshrc"
 }
