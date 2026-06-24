@@ -926,3 +926,22 @@ gcenv() {
       ;;
   esac
 }
+
+# ---------- Prompt helper (zsh) ----------
+
+# Emit a badge for the active profile, for use in PROMPT/RPROMPT:
+#   setopt prompt_subst
+#   RPROMPT='$(gcenv_prompt_info)'
+# Customizable via ZSH_THEME_GCENV_PREFIX / ZSH_THEME_GCENV_SUFFIX. Uses zsh's
+# native %F/%f color escapes, so it needs no oh-my-zsh `colors` module — and it
+# lives here (not only in the omz plugin) so plain `source gcenv.sh` installs get
+# it too. zsh-guarded because the body uses zsh prompt syntax; bash skips it.
+if [ -n "${ZSH_VERSION:-}" ]; then
+  gcenv_prompt_info() {
+    [[ -n "$GCENV_ACTIVE" ]] || return
+    local prefix="%F{blue}☁ " suffix="%f"
+    [[ -n "${ZSH_THEME_GCENV_PREFIX+x}" ]] && prefix="$ZSH_THEME_GCENV_PREFIX"
+    [[ -n "${ZSH_THEME_GCENV_SUFFIX+x}" ]] && suffix="$ZSH_THEME_GCENV_SUFFIX"
+    print -rn -- "${prefix}${GCENV_ACTIVE}${suffix}"
+  }
+fi
