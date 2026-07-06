@@ -23,6 +23,25 @@ _gcenv_ensure_dirs() {
   chmod 700 "$GCENV_ADC_DIR" "$GCENV_CLAUDE_DIR" 2>/dev/null || true
 }
 
+# Write $2 to path $1 atomically (temp file in the same dir + rename), so a
+# concurrent reader in another session/tab never sees a half-written state or
+# ADC file — a plain `>` redirect (or `cp`) truncates in place and can be read
+# empty mid-write. Content is passed as a single argument (small files only).
+_gcenv_atomic_write() {
+  local dest="$1" content="$2" tmp
+  tmp="$(mktemp "$dest.XXXXXX")" || return 1
+  printf '%s' "$content" > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$dest" || { rm -f "$tmp"; return 1; }
+}
+
+# Copy file $1 to $2 atomically (temp + rename in the destination dir).
+_gcenv_atomic_copy() {
+  local src="$1" dest="$2" tmp
+  tmp="$(mktemp "$dest.XXXXXX")" || return 1
+  cp "$src" "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$dest" || { rm -f "$tmp"; return 1; }
+}
+
 # Reject anything that could escape the profiles dir or smuggle shell metacharacters
 # through code paths that source profile files or build paths from the name.
 _gcenv_validate_name() {
@@ -521,10 +540,12 @@ _gcenv_login() {
     return 1
   fi
 
-  # Copy ADC (with quota project already set via --billing-project) to profile-specific location
+  # Copy ADC (with quota project already set via --billing-project) to the
+  # profile-specific location. Atomic so a concurrent scoped command in another
+  # session can't read a truncated ADC mid-copy.
   local default_adc="$HOME/.config/gcloud/application_default_credentials.json"
   if [[ -f "$default_adc" ]]; then
-    cp "$default_adc" "$GCENV_ADC_DIR/$name.json"
+    _gcenv_atomic_copy "$default_adc" "$GCENV_ADC_DIR/$name.json"
   fi
 
   echo ""
@@ -638,32 +659,63 @@ _gcenv_claude_repo_profile() {
   return 1
 }
 
-# Print the active profile for a session. Resolution order MUST match the
+# Resolve the active profile for a session. Resolution order MUST match the
 # PreToolUse hook (_gcenv_hook_active_profile): per-session state file, then a
-# repo .gcenv-profile, then the global default file. Returns 0 with the profile
-# on stdout if found, 1 otherwise.
+# repo .gcenv-profile, then — only when GCENV_ALLOW_GLOBAL_DEFAULT=1 — the global
+# default file. Returns 0 if a profile resolved, 1 otherwise.
+#
+# The result is returned via the globals _GCENV_RESOLVED_PROFILE and
+# _GCENV_RESOLVED_FROM (session|repo|default) rather than stdout, so callers must
+# invoke this in the CURRENT shell (not `$(...)`). Using a variable was the point
+# — the source leg has to survive back to the caller, and a command substitution
+# runs in a subshell where any assignment would be lost.
 _gcenv_claude_active_profile() {
-  local sid="$1" f
-  f="$(_gcenv_claude_state_path "$sid")"
-  if [[ -f "$f" ]]; then
-    cat "$f"
+  local sid="$1" f repo
+  _GCENV_RESOLVED_PROFILE=""
+  _GCENV_RESOLVED_FROM=""
+  # Skip the per-session leg when we have no real session id. _gcenv_claude_session_id
+  # returns the literal "default" when CLAUDE_CODE_SESSION_ID is unset, and that
+  # is the RESERVED filename for the global default (leg 3) — reading it here
+  # would surface the global default as a "session" pin and bypass the
+  # GCENV_ALLOW_GLOBAL_DEFAULT gate, diverging from the hook resolver (which
+  # skips leg 1 on an empty/invalid sid).
+  if [[ -n "$sid" && "$sid" != "default" ]]; then
+    f="$(_gcenv_claude_state_path "$sid")"
+    if [[ -f "$f" ]]; then
+      _GCENV_RESOLVED_PROFILE="$(head -n1 "$f" 2>/dev/null | tr -d '[:space:]')"
+      _GCENV_RESOLVED_FROM="session"
+      return 0
+    fi
+  fi
+  if repo="$(_gcenv_claude_repo_profile)"; then
+    _GCENV_RESOLVED_PROFILE="$repo"
+    _GCENV_RESOLVED_FROM="repo"
     return 0
   fi
-  if _gcenv_claude_repo_profile; then
-    return 0
-  fi
-  f="$(_gcenv_claude_state_path "default")"
-  if [[ -f "$f" ]]; then
-    cat "$f"
-    return 0
+  # Global default is opt-in only — see _gcenv_hook_active_profile for why a
+  # silent machine-wide default is a cross-session bleed hazard.
+  if [[ "${GCENV_ALLOW_GLOBAL_DEFAULT:-}" == "1" ]]; then
+    f="$(_gcenv_claude_state_path "default")"
+    if [[ -f "$f" ]]; then
+      _GCENV_RESOLVED_PROFILE="$(head -n1 "$f" 2>/dev/null | tr -d '[:space:]')"
+      _GCENV_RESOLVED_FROM="default"
+      return 0
+    fi
   fi
   return 1
 }
 
 _gcenv_claude_use() {
-  local name="$1"
+  local name="" global=0
+  while (( $# )); do
+    case "$1" in
+      --global) global=1; shift ;;
+      -*) echo "gcenv: unknown option '$1'" >&2; return 1 ;;
+      *) [[ -z "$name" ]] && name="$1"; shift ;;
+    esac
+  done
   if [[ -z "$name" ]]; then
-    echo "Usage: gcenv claude use <profile-name>" >&2
+    echo "Usage: gcenv claude use [--global] <profile-name>" >&2
     return 1
   fi
   _gcenv_validate_name "$name" || return 1
@@ -672,17 +724,52 @@ _gcenv_claude_use() {
     return 1
   fi
   _gcenv_ensure_dirs
+
+  # --global writes the machine-wide default.profile that every otherwise-
+  # unconfigured session falls back to. It is a deliberate, cross-session act,
+  # so gate it to a human at a real terminal: never let an agent set it (a
+  # silent global default is exactly the cross-session bleed we are closing),
+  # and it only takes effect at read time when GCENV_ALLOW_GLOBAL_DEFAULT=1.
+  if (( global )); then
+    if [[ -n "${CLAUDECODE:-}" || ! -t 0 ]]; then
+      echo "gcenv: 'gcenv claude use --global' is refused inside Claude / non-interactive shells — a machine-wide default silently scopes every other session. Set a per-repo '.gcenv-profile' or a per-session 'gcenv claude use $name' instead." >&2
+      return 1
+    fi
+    if ! _gcenv_atomic_write "$(_gcenv_claude_state_path "default")" "$name"$'\n'; then
+      echo "gcenv: failed to write global default profile" >&2
+      return 1
+    fi
+    echo "gcenv: set GLOBAL default profile to '$name'."
+    echo "  This applies to every session with no per-session pin and no repo .gcenv-profile,"
+    echo "  and only when GCENV_ALLOW_GLOBAL_DEFAULT=1 is set in that session's environment."
+    return 0
+  fi
+
   local sid
   sid="$(_gcenv_claude_session_id)"
-  printf '%s\n' "$name" > "$(_gcenv_claude_state_path "$sid")"
+  # Refuse to fall back to the shared "default" key: writing default.profile
+  # here would silently repoint every unpinned session (the bug this release
+  # fixes). If we cannot identify the Claude session, tell the user how to scope
+  # explicitly instead of poisoning the global default.
+  if [[ "$sid" == "default" ]]; then
+    echo "gcenv: cannot determine the Claude session id (CLAUDE_CODE_SESSION_ID is unset)." >&2
+    echo "  Refusing to write a machine-wide default. Scope this repo instead:" >&2
+    echo "      echo $name > .gcenv-profile" >&2
+    echo "  (a per-repo file also covers subagents, which carry their own session id)." >&2
+    return 1
+  fi
+  if ! _gcenv_atomic_write "$(_gcenv_claude_state_path "$sid")" "$name"$'\n'; then
+    echo "gcenv: failed to write session profile state" >&2
+    return 1
+  fi
   echo "Claude session '$sid' will use profile '$name' for GCP commands."
 }
 
 _gcenv_claude_show() {
-  local sid profile
+  local sid
   sid="$(_gcenv_claude_session_id)"
-  if profile="$(_gcenv_claude_active_profile "$sid")"; then
-    echo "Active claude profile: $profile (session: $sid)"
+  if _gcenv_claude_active_profile "$sid"; then
+    echo "Active claude profile: $_GCENV_RESOLVED_PROFILE (session: $sid) [via $_GCENV_RESOLVED_FROM]"
   else
     echo "No active claude profile (session: $sid)"
   fi
@@ -693,6 +780,63 @@ _gcenv_claude_off() {
   sid="$(_gcenv_claude_session_id)"
   rm -f "$(_gcenv_claude_state_path "$sid")"
   echo "Cleared active claude profile for session '$sid'."
+}
+
+# Diagnose the exact resolution the hook will perform for this shell, and flag
+# the failure modes behind cross-session bleed: (1) the session id `gcenv claude
+# use` writes under (an env var) must match the id the PreToolUse hook reads
+# (the payload) — they differ for subagents and can differ across resume; (2) a
+# repo .gcenv-profile is the only cwd-based leg and is what survives both.
+_gcenv_claude_doctor() {
+  local sid
+  sid="$(_gcenv_claude_session_id)"
+  echo "gcenv claude doctor"
+  echo "  session id (writer, from env): $sid"
+  if [[ "$sid" == "default" ]]; then
+    echo "    ⚠ no CLAUDE_CODE_SESSION_ID — 'gcenv claude use' cannot pin this session."
+  fi
+  if [[ -n "${CLAUDE_CODE_CHILD_SESSION:-}" ]]; then
+    echo "    ⚠ this looks like a subagent (CLAUDE_CODE_CHILD_SESSION set); its id differs"
+    echo "      from the parent, so a parent's 'gcenv claude use' pin will NOT apply here."
+    echo "      Use a repo .gcenv-profile so scoping is cwd-based and covers subagents."
+  fi
+  if _gcenv_claude_active_profile "$sid"; then
+    echo "  resolves to: $_GCENV_RESOLVED_PROFILE [via $_GCENV_RESOLVED_FROM]"
+  else
+    echo "  resolves to: (nothing — GCP commands run unscoped/global)"
+  fi
+  local repo
+  if repo="$(_gcenv_claude_repo_profile)"; then
+    echo "  repo .gcenv-profile: $repo"
+  else
+    echo "  repo .gcenv-profile: (none in cwd or ancestors)"
+  fi
+  local def; def="$(_gcenv_claude_state_path "default")"
+  if [[ -f "$def" ]]; then
+    echo "  global default.profile: $(head -n1 "$def" 2>/dev/null) (consulted only if GCENV_ALLOW_GLOBAL_DEFAULT=1)"
+  fi
+}
+
+# Remove per-session state files. Session pins are keyed by id and are otherwise
+# harmless, but they are never garbage-collected, so stale ones accumulate and a
+# reused id could inherit one. Never touches default.profile.
+_gcenv_claude_prune() {
+  _gcenv_ensure_dirs
+  # zsh aborts on a no-match glob by default; make the loop yield nothing instead
+  # of erroring when the dir is empty. (bash: the [[ -e ]] guard handles it.)
+  [[ -n "${ZSH_VERSION:-}" ]] && setopt local_options null_glob 2>/dev/null
+  local f base found=0
+  for f in "$GCENV_CLAUDE_DIR"/*.profile; do
+    [[ -e "$f" ]] || continue
+    base="${f##*/}"; base="${base%.profile}"
+    [[ "$base" == "default" ]] && continue
+    rm -f "$f" && found=1
+  done
+  if (( found )); then
+    echo "gcenv: cleared all per-session claude profile pins (default.profile kept)."
+  else
+    echo "gcenv: no per-session claude profile pins to clear."
+  fi
 }
 
 # Run a single command (argv form) with a profile's env loaded in a subshell.
@@ -719,7 +863,9 @@ _gcenv_claude_run() {
   if [[ -z "$profile" ]]; then
     local sid
     sid="$(_gcenv_claude_session_id)"
-    profile="$(_gcenv_claude_active_profile "$sid" 2>/dev/null || true)"
+    if _gcenv_claude_active_profile "$sid" 2>/dev/null; then
+      profile="$_GCENV_RESOLVED_PROFILE"
+    fi
   fi
 
   if [[ -z "$profile" ]]; then
@@ -872,18 +1018,24 @@ _gcenv_claude() {
   local sub="${1:-help}"
   shift 2>/dev/null
   case "$sub" in
-    use)   _gcenv_claude_use "$@" ;;
-    show)  _gcenv_claude_show ;;
-    off)   _gcenv_claude_off ;;
-    run)   _gcenv_claude_run "$@" ;;
-    init)  _gcenv_claude_init "$@" ;;
+    use)    _gcenv_claude_use "$@" ;;
+    show)   _gcenv_claude_show ;;
+    off)    _gcenv_claude_off ;;
+    doctor) _gcenv_claude_doctor ;;
+    prune)  _gcenv_claude_prune ;;
+    run)    _gcenv_claude_run "$@" ;;
+    init)   _gcenv_claude_init "$@" ;;
     help|--help|-h|*)
       cat <<'EOF'
 Usage: gcenv claude <subcommand>
 
-  use <profile>             Set the active profile for this Claude session
-  show                      Show the active profile
+  use [--global] <profile>  Set the active profile for this Claude session
+                            (--global sets the machine-wide default; human,
+                            interactive terminals only)
+  show                      Show the active profile (and which leg resolved it)
   off                       Clear the active profile
+  doctor                    Diagnose session-id / resolution issues
+  prune                     Remove stale per-session pins (keeps default.profile)
   run [--profile N] -- CMD  Run a single command with profile env loaded
   init [--user] [--no-claude-md] [--pin <profile>]
                             Install the Claude Code PreToolUse hook

@@ -233,6 +233,12 @@ Every Claude session in that repo now auto-scopes to `prod` with zero commands �
 
 Commit `.gcenv-profile` to share a team default; `.gitignore` it for personal use.
 
+Because it resolves by **current directory**, `.gcenv-profile` is also the only leg that reliably covers **subagents** (spawned via the Task tool): a subagent carries its own Claude session id, so a `gcenv claude use` pin (which is keyed by session id) does not apply to it, but a repo file does. Prefer `.gcenv-profile` over `gcenv claude use` for any repo where the GCP identity matters.
+
+#### Resolution order
+
+For a given Bash call the profile is resolved as: (1) the per-session pin from `gcenv claude use`, then (2) the nearest `.gcenv-profile`, then (3) the machine-wide `~/.gcenv/claude/default.profile`. Leg 3 is **opt-in** — it is consulted only when `GCENV_ALLOW_GLOBAL_DEFAULT=1` is set in the environment. A single global default that applies automatically would silently scope every otherwise-unconfigured session (and every subagent) to one account — the exact cross-account bleed gcenv exists to prevent — so `gcenv claude use --global <name>` (interactive, human-only) is the sole way to set it, and reading it requires the explicit opt-in. Use `gcenv claude doctor` to see what the current shell resolves to and why.
+
 ### Pinning a profile (high-stakes repos)
 
 For repos where Claude should *never* leave one account (a customer-facing repo, a repo touching production), pin it at hook-install time:

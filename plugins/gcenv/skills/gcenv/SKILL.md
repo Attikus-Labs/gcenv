@@ -21,11 +21,13 @@ Trigger this skill when:
 
 The active profile for this Claude session is determined in this order:
 
-1. **Per-session state** — what the user (or you) last set via `gcenv claude use <name>`.
+1. **Per-session state** — what the user (or you) last set via `gcenv claude use <name>`. Keyed by the Claude session id.
 2. **`.gcenv-profile`** — a file in the current repo (or any ancestor directory) containing a profile name. Acts as a per-repo default.
-3. **`~/.gcenv/claude/default.profile`** — a global fallback (rare).
+3. **`~/.gcenv/claude/default.profile`** — a global machine-wide default, **opt-in only**: it is consulted solely when `GCENV_ALLOW_GLOBAL_DEFAULT=1` is set in the environment. Off by default, because a single default silently scopes every unconfigured session (and every subagent) to one account.
 
 If the hook config was installed with `--pin <profile>`, that profile overrides everything above. The user typically uses `--pin` only in customer-facing repos.
+
+**Subagents:** a subagent (spawned via the Task tool) carries its own session id, so a parent's `gcenv claude use` pin (leg 1) does **not** apply to it — it will resolve via leg 2 or fall through to unscoped. For any repo where GCP identity matters, add a **`.gcenv-profile`** file (leg 2, cwd-based) — it is the only leg that reliably covers subagents and survives session resume. Run `gcenv claude doctor` to see exactly what the current shell resolves to and why.
 
 ## Invoking gcenv
 
@@ -39,15 +41,16 @@ Run these via the standard Bash tool.
 | Command | What it does |
 |---|---|
 | `gcenv list` | List all profiles. |
-| `gcenv claude show` | Show which profile is active for this session. |
+| `gcenv claude show` | Show which profile is active for this session (and which leg resolved it). |
 | `gcenv claude use <name>` | Set the active profile for the rest of this session. |
 | `gcenv claude off` | Clear the active profile (commands run unscoped). |
+| `gcenv claude doctor` | Diagnose resolution / session-id issues (use when a profile isn't applying, or in a subagent). |
 | `gcenv add <name> --account=<email> --project=<id> --no-auth` | Create a new profile non-interactively. Always pass `--account`, `--project`, and `--no-auth` inside Claude — the interactive picker and browser auth can't be driven from here. |
 | `gcenv current` | Show what's set in this terminal's env (mostly relevant outside Claude). |
 
 ## Behavior rules
 
-1. **Never run *raw* `gcloud auth login`, `gcloud auth application-default login`, or `gcloud config set` inside Claude.** Those are global, machine-wide changes that leak out of this session and clobber other terminals. Use `gcenv` commands instead. To re-authenticate, use `gcenv login <profile>` — the gcenv wrapper that runs the auth and copies the result into the profile's own ADC file. Unlike raw `gcloud auth login`, it **can** run in-session on a machine with a browser (see rule 3).
+1. **Never run *raw* `gcloud auth login`, `gcloud auth application-default login`, `gcloud auth activate-service-account`, or `gcloud config set/unset` inside Claude.** Those are global, machine-wide changes that leak out of this session and clobber other terminals. The PreToolUse hook now **denies** these outright — don't try to work around the denial (e.g. by setting `GCENV_ALLOW_GLOBAL_MUTATION=1`) unless the user explicitly asks for a global change. Use `gcenv` commands instead. To re-authenticate, use `gcenv login <profile>` — the gcenv wrapper that runs the auth and copies the result into the profile's own ADC file. Unlike raw `gcloud auth login`, it **can** run in-session on a machine with a browser (see rule 3).
 
 2. **Confirm the active profile before destructive GCP work.** Before `gcloud compute instances delete`, `terraform apply`, `bq rm`, or any production-affecting command, run `gcenv claude show` and confirm with the user.
 
