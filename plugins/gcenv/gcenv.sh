@@ -673,11 +673,19 @@ _gcenv_claude_active_profile() {
   local sid="$1" f repo
   _GCENV_RESOLVED_PROFILE=""
   _GCENV_RESOLVED_FROM=""
-  f="$(_gcenv_claude_state_path "$sid")"
-  if [[ -f "$f" ]]; then
-    _GCENV_RESOLVED_PROFILE="$(head -n1 "$f" 2>/dev/null | tr -d '[:space:]')"
-    _GCENV_RESOLVED_FROM="session"
-    return 0
+  # Skip the per-session leg when we have no real session id. _gcenv_claude_session_id
+  # returns the literal "default" when CLAUDE_CODE_SESSION_ID is unset, and that
+  # is the RESERVED filename for the global default (leg 3) — reading it here
+  # would surface the global default as a "session" pin and bypass the
+  # GCENV_ALLOW_GLOBAL_DEFAULT gate, diverging from the hook resolver (which
+  # skips leg 1 on an empty/invalid sid).
+  if [[ -n "$sid" && "$sid" != "default" ]]; then
+    f="$(_gcenv_claude_state_path "$sid")"
+    if [[ -f "$f" ]]; then
+      _GCENV_RESOLVED_PROFILE="$(head -n1 "$f" 2>/dev/null | tr -d '[:space:]')"
+      _GCENV_RESOLVED_FROM="session"
+      return 0
+    fi
   fi
   if repo="$(_gcenv_claude_repo_profile)"; then
     _GCENV_RESOLVED_PROFILE="$repo"

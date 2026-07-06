@@ -69,20 +69,32 @@ _gcenv_hook_global_mutation() {
   local first="${cmd%% *}"
   first="${first##*/}"
   [[ "$first" == gcloud ]] || return 1
-  # Match only the subcommand PATH — the leading run of words before the first
-  # flag / '=' / quote — so the phrase inside a quoted value (e.g.
-  # --description="… config set …") never triggers a false deny. Collapse runs
-  # of whitespace first (tr -s) so `config  set` or `config<TAB>set` can't dodge
-  # the match. (A global flag placed *before* the subcommand, e.g.
-  # `gcloud --project x config set`, is a rare form and is not caught — the
-  # denial is a guardrail against the common spellings, not a hard boundary.)
-  local head=" ${cmd#*gcloud} "
-  head="$(printf '%s' "$head" | tr -s '[:space:]' ' ')"
-  head="${head%% -*}"     # stop at the first flag (space-dash)
-  head="${head%%=*}"      # ...or the first =VALUE
-  head="${head%%\'*}"     # ...or a quoted token (single)
-  head="${head%%\"*}"     # ...or a quoted token (double)
-  case " $head " in
+  # Recover the subcommand path and test it against the known global-mutating
+  # subcommands, robust to how gcloud was invoked:
+  #   - drop the binary token by first-space (path-safe: a dir named like
+  #     ".../gcloud-sdk/..." can no longer fool the split);
+  #   - stop at the first shell separator / comment / backtick so a *second*
+  #     command or a comment (`gcloud info # config set`) can't trip the match;
+  #   - stop at the first quote so a phrase inside a quoted flag VALUE
+  #     (`--description="… config set …"`) can't either;
+  #   - drop flag tokens (-x / --f / --f=v) so a global flag placed before the
+  #     subcommand (`gcloud --project=x config set`) is still caught;
+  #   - test the surviving positional words for the subcommand phrase.
+  local rest="${cmd#* }"          # everything after the binary token
+  rest="${rest%%[;|&#]*}"         # stop at ; | & or #
+  rest="${rest%%\`*}"             # ...or a backtick (command substitution)
+  rest="${rest%%\"*}"             # ...or a double-quoted value
+  rest="${rest%%\'*}"             # ...or single-quoted
+  local -a toks=()
+  read -ra toks <<< "$rest" || true
+  local sub="" tok
+  for tok in "${toks[@]}"; do
+    case "$tok" in
+      -*) ;;                      # flag — skip (its =value, if any, is in-token)
+      *) sub+="$tok " ;;
+    esac
+  done
+  case " $sub" in
     *" config set "*|*" config unset "*) return 0 ;;
     *" auth login "*|*" auth application-default login "*) return 0 ;;
     *" auth activate-service-account "*|*" auth revoke "*) return 0 ;;
@@ -129,7 +141,9 @@ _gcenv_hook_repo_profile() {
 # or a per-session `gcenv claude use` (leg 1) instead.
 _gcenv_hook_active_profile() {
   local sid="$1" f
-  if [[ -n "$sid" ]] && [[ "$sid" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  # "default" is the RESERVED filename for the global default (leg 3), never a
+  # session pin — exclude it here so the opt-in gate below can't be bypassed.
+  if [[ -n "$sid" && "$sid" != "default" ]] && [[ "$sid" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     f="$GCENV_CLAUDE_DIR/$sid.profile"
     if [[ -f "$f" ]]; then
       cat "$f"
